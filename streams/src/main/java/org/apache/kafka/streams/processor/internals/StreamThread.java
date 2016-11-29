@@ -284,8 +284,11 @@ public class StreamThread extends Thread {
         } catch (Throwable e) {
             log.error("{} Failed to close restore consumer: ", logPrefix, e);
         }
-
-        // remove all tasks
+        try {
+            partitionAssignor.close();
+        } catch (Throwable e) {
+            log.error("stream-thread [{}] Failed to close KafkaStreamClient: ", this.getName(), e);
+        }
         removeStreamTasks();
         removeStandbyTasks();
 

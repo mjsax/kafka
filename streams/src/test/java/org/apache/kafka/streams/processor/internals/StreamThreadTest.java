@@ -38,6 +38,7 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.TopologyBuilder;
 import org.apache.kafka.test.MockClientSupplier;
+import org.apache.kafka.test.MockInternalTopicManager;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.MockTimestampExtractor;
 import org.junit.Test;
@@ -166,7 +167,8 @@ public class StreamThreadTest {
         builder.addSource("source3", "topic3");
         builder.addProcessor("processor", new MockProcessorSupplier(), "source2", "source3");
 
-        StreamThread thread = new StreamThread(builder, config, new MockClientSupplier(), applicationId, clientId, processId, new Metrics(), new SystemTime(), new StreamsMetadataState(builder)) {
+        MockClientSupplier mockClientSupplier = new MockClientSupplier();
+        StreamThread thread = new StreamThread(builder, config, mockClientSupplier, applicationId, clientId, processId, new Metrics(), new SystemTime(), new StreamsMetadataState(builder)) {
             @Override
             protected StreamTask createStreamTask(TaskId id, Collection<TopicPartition> partitionsForTask) {
                 ProcessorTopology topology = builder.build(id.topicGroupId);
@@ -174,7 +176,7 @@ public class StreamThreadTest {
             }
         };
 
-        initPartitionGrouper(config, thread);
+        initPartitionGrouper(config, thread, mockClientSupplier);
 
         ConsumerRebalanceListener rebalanceListener = thread.rebalanceListener;
 
@@ -302,7 +304,8 @@ public class StreamThreadTest {
             TopologyBuilder builder = new TopologyBuilder().setApplicationId("X");
             builder.addSource("source1", "topic1");
 
-            StreamThread thread = new StreamThread(builder, config, new MockClientSupplier(), applicationId, clientId,  processId, new Metrics(), mockTime, new StreamsMetadataState(builder)) {
+            MockClientSupplier mockClientSupplier = new MockClientSupplier();
+            StreamThread thread = new StreamThread(builder, config, mockClientSupplier, applicationId, clientId,  processId, new Metrics(), mockTime, new StreamsMetadataState(builder)) {
                 @Override
                 public void maybeClean() {
                     super.maybeClean();
@@ -315,7 +318,7 @@ public class StreamThreadTest {
                 }
             };
 
-            initPartitionGrouper(config, thread);
+            initPartitionGrouper(config, thread, mockClientSupplier);
 
             ConsumerRebalanceListener rebalanceListener = thread.rebalanceListener;
 
@@ -421,7 +424,8 @@ public class StreamThreadTest {
             TopologyBuilder builder = new TopologyBuilder().setApplicationId("X");
             builder.addSource("source1", "topic1");
 
-            StreamThread thread = new StreamThread(builder, config, new MockClientSupplier(), applicationId, clientId,  processId, new Metrics(), mockTime, new StreamsMetadataState(builder)) {
+            MockClientSupplier mockClientSupplier = new MockClientSupplier();
+            StreamThread thread = new StreamThread(builder, config, mockClientSupplier, applicationId, clientId,  processId, new Metrics(), mockTime, new StreamsMetadataState(builder)) {
                 @Override
                 public void maybeCommit() {
                     super.maybeCommit();
@@ -434,7 +438,7 @@ public class StreamThreadTest {
                 }
             };
 
-            initPartitionGrouper(config, thread);
+            initPartitionGrouper(config, thread, mockClientSupplier);
 
             ConsumerRebalanceListener rebalanceListener = thread.rebalanceListener;
 
@@ -499,11 +503,13 @@ public class StreamThreadTest {
         assertSame(clientSupplier.restoreConsumer, thread.restoreConsumer);
     }
 
-    private void initPartitionGrouper(StreamsConfig config, StreamThread thread) {
+    private void initPartitionGrouper(StreamsConfig config, StreamThread thread, MockClientSupplier clientSupplier) {
 
         StreamPartitionAssignor partitionAssignor = new StreamPartitionAssignor();
 
         partitionAssignor.configure(config.getConsumerConfigs(thread, thread.applicationId, thread.clientId));
+        MockInternalTopicManager internalTopicManager = new MockInternalTopicManager(thread.config, clientSupplier.restoreConsumer);
+        partitionAssignor.setInternalTopicManager(internalTopicManager);
 
         Map<String, PartitionAssignor.Assignment> assignments =
                 partitionAssignor.assign(metadata, Collections.singletonMap("client", subscription));
