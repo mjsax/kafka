@@ -110,7 +110,7 @@ public class StreamsKafkaClient {
     /**
      * Creates a set of new topics using batch request.
      *
-     * @param topicsMap
+     * @param topicsMap maps topic names to number of partition
      * @param replicationFactor
      * @param windowChangeLogAdditionalRetention
      */

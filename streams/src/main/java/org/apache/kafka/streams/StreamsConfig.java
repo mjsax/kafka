@@ -141,6 +141,10 @@ public class StreamsConfig extends AbstractConfig {
     public static final String CACHE_MAX_BYTES_BUFFERING_CONFIG = "cache.max.bytes.buffering";
     public static final String CACHE_MAX_BYTES_BUFFERING_DOC = "Maximum number of memory bytes to be used for buffering across all threads";
 
+    /** <code>autostop.at</code> */
+    public static final String AUTOSTOP_AT_CONFIG = "autostop.at";
+    public static final String AUTOSTOP_AT_DOC = "Automatically stop processing when specific log offsets are reached per partition. Allowed values: 'eol' (end-of-log). Default: <code>null</code>";
+
     public static final String SECURITY_PROTOCOL_CONFIG = CommonClientConfigs.SECURITY_PROTOCOL_CONFIG;
     public static final String SECURITY_PROTOCOL_DOC = CommonClientConfigs.SECURITY_PROTOCOL_DOC;
     public static final String DEFAULT_SECURITY_PROTOCOL = CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL;
@@ -283,6 +287,11 @@ public class StreamsConfig extends AbstractConfig {
                         atLeast(0),
                         Importance.LOW,
                         CACHE_MAX_BYTES_BUFFERING_DOC)
+                .define(AUTOSTOP_AT_CONFIG,
+                        Type.STRING,
+                        null,
+                        Importance.LOW,
+                        AUTOSTOP_AT_DOC)
                 .define(SECURITY_PROTOCOL_CONFIG,
                         Type.STRING,
                         DEFAULT_SECURITY_PROTOCOL,

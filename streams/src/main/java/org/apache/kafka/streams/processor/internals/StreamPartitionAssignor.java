@@ -158,6 +158,7 @@ public class StreamPartitionAssignor implements PartitionAssignor, Configurable 
     private Map<TaskId, Set<TopicPartition>> activeTasks;
 
     private InternalTopicManager internalTopicManager;
+    private boolean stopAtEndOfLog = false;
 
     /**
      * We need to have the PartitionAssignor and its StreamThread to be mutually accessible
@@ -168,6 +169,15 @@ public class StreamPartitionAssignor implements PartitionAssignor, Configurable 
     @Override
     public void configure(Map<String, ?> configs) {
         numStandbyReplicas = (Integer) configs.get(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG);
+        final Object autoStopAt = configs.get(StreamsConfig.AUTOSTOP_AT_CONFIG);
+
+        if (autoStopAt != null) {
+            if (autoStopAt.equals("eol")) {
+                stopAtEndOfLog = true;
+            } else {
+                log.error("Unkown value '{}' for parameter {}. Allowed only null or 'eol'.", autoStopAt, StreamsConfig.AUTOSTOP_AT_CONFIG);
+            }
+        }
 
         Object o = configs.get(StreamsConfig.InternalConfig.STREAM_THREAD_INSTANCE);
         if (o == null) {
@@ -262,7 +272,6 @@ public class StreamPartitionAssignor implements PartitionAssignor, Configurable 
 
     @Override
     public Map<String, Assignment> assign(Cluster metadata, Map<String, Subscription> subscriptions) {
-
         // construct the client metadata from the decoded subscription info
         Map<UUID, ClientMetadata> clientsMetadata = new HashMap<>();
 
@@ -525,6 +534,21 @@ public class StreamPartitionAssignor implements PartitionAssignor, Configurable 
                 assignment.put(consumer, new Assignment(activePartitions, new AssignmentInfo(active, standby, partitionsByHostState).encode()));
                 i++;
             }
+        }
+
+        MetadataTopicManager metadataTopicManager = new MetadataTopicManager(
+            streamThread.config,
+            streamThread.restoreConsumer,
+            streamThread.producer);
+
+        if (stopAtEndOfLog) {
+            final Set<TopicPartition> allPartitions = new HashSet<>();
+            for (final Assignment singleAssignemnt : assignment.values()) {
+                allPartitions.addAll(singleAssignemnt.partitions());
+            }
+            metadataTopicManager.maybeWriteNewStopOffsets(allPartitions);
+        } else {
+            metadataTopicManager.cleanMetadataTopic();
         }
 
         return assignment;
