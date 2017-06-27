@@ -266,7 +266,13 @@ public class EosTestDriver extends SmokeTestUtil {
         }
 
         if (!allRecordsReceived) {
-            throw new RuntimeException("FAIL: did not receive all records after 30 sec idle time.");
+            String msg = "";
+            for (final Map.Entry<TopicPartition, Long> endOffsets : readEndOffsets.entrySet()) {
+                final TopicPartition tp = endOffsets.getKey();
+                msg += "  " + tp + "'s current offset: " + endOffsets.getValue()
+                    + " (end offset: " + consumer.position(tp) + ")\n";
+            }
+            throw new RuntimeException("FAIL: did not receive all records after 30 sec idle time. Expected\n" + msg);
         }
 
         return recordPerTopicPerPartition;

@@ -20,7 +20,7 @@ from ducktape.mark import parametrize, ignore
 from kafkatest.services.kafka import KafkaService
 from kafkatest.tests.kafka_test import KafkaTest
 from kafkatest.services.zookeeper import ZookeeperService
-from kafkatest.services.streams import StreamsSmokeTestDriverService, StreamsSmokeTestJobRunnerService
+from kafkatest.services.streams import StreamsEosTestDriverService, StreamsEosTestJobRunnerService, StreamsEosTestVerifyRunnerService
 import time
 import signal
 from random import randint
@@ -57,36 +57,23 @@ failures = {
     "hard_shutdown": hard_shutdown
 }
         
-class StreamsBrokerBounceTest(Test):
+class StreamsEosBrokerBounceTest(Test):
     """
     Simple test of Kafka Streams with brokers failing
     """
 
     def __init__(self, test_context):
-        super(StreamsBrokerBounceTest, self).__init__(test_context)
+        super(StreamsEosBrokerBounceTest, self).__init__(test_context)
         self.replication = 3
         self.partitions = 3
-        self.topics = {
-            'echo' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                       'configs': {"min.insync.replicas": 2}},
-            'data' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                       'configs': {"min.insync.replicas": 2} },
-            'min' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                      'configs': {"min.insync.replicas": 2} },
-            'max' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                      'configs': {"min.insync.replicas": 2} },
-            'sum' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                      'configs': {"min.insync.replicas": 2} },
-            'dif' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                      'configs': {"min.insync.replicas": 2} },
-            'cnt' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                      'configs': {"min.insync.replicas": 2} },
-            'avg' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                      'configs': {"min.insync.replicas": 2} },
-            'wcnt' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                       'configs': {"min.insync.replicas": 2} },
-            'tagg' : { 'partitions': self.partitions, 'replication-factor': self.replication,
-                       'configs': {"min.insync.replicas": 2} }
+        self.topics={
+            'data' : { 'partitions': 5, 'replication-factor': 2 },
+            'echo' : { 'partitions': 5, 'replication-factor': 2 },
+            'min' : { 'partitions': 5, 'replication-factor': 2 },
+            'sum' : { 'partitions': 5, 'replication-factor': 2 },
+            'repartition' : { 'partitions': 5, 'replication-factor': 2 },
+            'max' : { 'partitions': 5, 'replication-factor': 2 },
+            'cnt' : { 'partitions': 5, 'replication-factor': 2 }
         }
 
     def fail_broker_type(self, failure_mode, broker_type):
@@ -110,49 +97,44 @@ class StreamsBrokerBounceTest(Test):
          # Setup phase
         self.zk = ZookeeperService(self.test_context, num_nodes=1)
         self.zk.start()
-        
+
         self.kafka = KafkaService(self.test_context, num_nodes=self.replication,
                                   zk=self.zk, topics=self.topics)
         self.kafka.start()
         # Start test harness
-        self.driver = StreamsSmokeTestDriverService(self.test_context, self.kafka)
-        self.processor1 = StreamsSmokeTestJobRunnerService(self.test_context, self.kafka)
+        self.driver = StreamsEosTestDriverService(self.test_context, self.kafka)
+        self.processor = StreamsEosTestJobRunnerService(self.test_context, self.kafka)
+        self.verifier = StreamsEosTestVerifyRunnerService(self.test_context, self.kafka)
 
-        
         self.driver.start()
-        self.processor1.start()
+        self.processor.start()
 
     def collect_results(self, sleep_time_secs):
         data = {}
         # End test
-        self.driver.wait()
         self.driver.stop()
+        self.processor.stop()
 
-        self.processor1.stop()
-
-        node = self.driver.node
-        
         # Success is declared if streams does not crash when sleep time > 0
         # It should give an exception when sleep time is 0 since we kill the brokers immediately
         # and the topic manager cannot create internal topics with the desired replication factor
         if (sleep_time_secs == 0):
-            output_streams = self.processor1.node.account.ssh_capture("grep SMOKE-TEST-CLIENT-EXCEPTION %s" % self.processor1.STDOUT_FILE, allow_fail=False)
+            output_streams = self.processor.node.account.ssh_capture("grep EOS-TEST-CLIENT-EXCEPTION %s" % self.processor.STDOUT_FILE, allow_fail=False)
         else:
-            output_streams = self.processor1.node.account.ssh_capture("grep SMOKE-TEST-CLIENT-CLOSED %s" % self.processor1.STDOUT_FILE, allow_fail=False)
+            output_streams = self.processor.node.account.ssh_capture("grep EOS-TEST-CLIENT-CLOSED %s" % self.processor.STDOUT_FILE, allow_fail=False)
             
         for line in output_streams:
             data["Client closed"] = line
 
+        self.verifier.start()
+        self.verifier.wait()
+
         # Currently it is hard to guarantee anything about Kafka since we don't have exactly once.
         # With exactly once in place, success will be defined as ALL-RECORDS-DELIEVERD and SUCCESS
-        output = node.account.ssh_capture("grep -E 'ALL-RECORDS-DELIVERED|PROCESSED-MORE-THAN-GENERATED|PROCESSED-LESS-THAN-GENERATED' %s" % self.driver.STDOUT_FILE, allow_fail=False)
+        output = self.verifier.node.account.ssh_capture("grep -E 'ALL-RECORDS-DELIVERED' %s" % self.verifier.STDOUT_FILE, allow_fail=False)
         for line in output:
             data["Records Delivered"] = line
-        output = node.account.ssh_capture("grep -E 'SUCCESS|FAILURE' %s" % self.driver.STDOUT_FILE, allow_fail=False)
-        for line in output:
-            data["Logic Success/Failure"] = line
-            
-        
+
         return data
 
     @cluster(num_nodes=7)
