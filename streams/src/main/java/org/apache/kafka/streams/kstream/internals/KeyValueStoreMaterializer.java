@@ -19,6 +19,7 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.KeyValueWithTimestampStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
 
@@ -32,15 +33,16 @@ public class KeyValueStoreMaterializer<K, V> {
     /**
      * @return  StoreBuilder
      */
-    public StoreBuilder<KeyValueStore<K, V>> materialize() {
+    public StoreBuilder<KeyValueWithTimestampStore<K, V>> materialize() {
         KeyValueBytesStoreSupplier supplier = (KeyValueBytesStoreSupplier) materialized.storeSupplier();
         if (supplier == null) {
             final String name = materialized.storeName();
             supplier = Stores.persistentKeyValueStore(name);
         }
-        final StoreBuilder<KeyValueStore<K, V>> builder = Stores.keyValueStoreBuilder(supplier,
-                                                                                      materialized.keySerde(),
-                                                                                      materialized.valueSerde());
+        final StoreBuilder<KeyValueWithTimestampStore<K, V>> builder = Stores.keyValueWithTimestampStoreBuilder(
+            supplier,
+            materialized.keySerde(),
+            materialized.valueSerde());
 
         if (materialized.loggingEnabled()) {
             builder.withLoggingEnabled(materialized.logConfig());

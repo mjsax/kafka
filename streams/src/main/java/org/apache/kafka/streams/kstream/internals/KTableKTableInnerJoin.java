@@ -21,19 +21,17 @@ import org.apache.kafka.streams.kstream.ValueJoiner;
 import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 class KTableKTableInnerJoin<K, R, V1, V2> extends KTableKTableAbstractJoin<K, R, V1, V2> {
     private static final Logger LOG = LoggerFactory.getLogger(KTableKTableInnerJoin.class);
 
-    private final KeyValueMapper<K, V1, K> keyValueMapper = new KeyValueMapper<K, V1, K>() {
-        @Override
-        public K apply(final K key, final V1 value) {
-            return key;
-        }
-    };
+    private final KeyValueMapper<K, V1, K> keyValueMapper = (key, value) -> key;
 
     KTableKTableInnerJoin(final KTableImpl<K, ?, V1> table1,
                           final KTableImpl<K, ?, V2> table2,
@@ -94,20 +92,23 @@ class KTableKTableInnerJoin<K, R, V1, V2> extends KTableKTableAbstractJoin<K, R,
             R newValue = null;
             R oldValue = null;
 
-            final V2 value2 = valueGetter.get(key);
+            final ValueAndTimestamp<V2> value2 = valueGetter.get(key);
             if (value2 == null) {
                 return;
             }
 
             if (change.newValue != null) {
-                newValue = joiner.apply(change.newValue, value2);
+                newValue = joiner.apply(change.newValue, value2.value());
             }
 
             if (sendOldValues && change.oldValue != null) {
-                oldValue = joiner.apply(change.oldValue, value2);
+                oldValue = joiner.apply(change.oldValue, value2.value());
             }
 
-            context().forward(key, new Change<>(newValue, oldValue));
+            context().forward(
+                key,
+                new Change<>(newValue, oldValue),
+                To.all().withTimestamp(Math.max(context().timestamp(), value2.timestamp())));
         }
 
         @Override
@@ -120,6 +121,7 @@ class KTableKTableInnerJoin<K, R, V1, V2> extends KTableKTableAbstractJoin<K, R,
 
         private final KTableValueGetter<K, V1> valueGetter1;
         private final KTableValueGetter<K, V2> valueGetter2;
+        private ProcessorContext context;
 
         KTableKTableInnerJoinValueGetter(final KTableValueGetter<K, V1> valueGetter1,
                                          final KTableValueGetter<K, V2> valueGetter2) {
@@ -129,19 +131,21 @@ class KTableKTableInnerJoin<K, R, V1, V2> extends KTableKTableAbstractJoin<K, R,
 
         @Override
         public void init(final ProcessorContext context) {
+            this.context = context;
             valueGetter1.init(context);
             valueGetter2.init(context);
         }
 
         @Override
-        public R get(final K key) {
-            final V1 value1 = valueGetter1.get(key);
+        public ValueAndTimestamp<R> get(final K key) {
+            final ValueAndTimestamp<V1> value1 = valueGetter1.get(key);
 
             if (value1 != null) {
-                final V2 value2 = valueGetter2.get(keyValueMapper.apply(key, value1));
+                final ValueAndTimestamp<V2> value2 = valueGetter2.get(keyValueMapper.apply(key, value1.value()));
 
                 if (value2 != null) {
-                    return joiner.apply(value1, value2);
+                    final R joined = joiner.apply(value1.value(), value2.value());
+                    return joined == null ? null : new ValueAndTimestampImpl<>(joined, context.timestamp());
                 } else {
                     return null;
                 }

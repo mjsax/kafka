@@ -52,14 +52,18 @@ public class KeyValueWithTimestampStoreBuilder<K, V> extends AbstractStoreBuilde
             storeSupplier.metricsScope(),
             time,
             keySerde,
-            valueSerde);
+            valueSerde,
+            ValueAndTimestampSerde::new);
     }
 
     private KeyValueStore<Bytes, byte[]> maybeWrapCaching(final KeyValueStore<Bytes, byte[]> inner) {
         if (!enableCaching) {
             return inner;
         }
-        return new CachingKeyValueStore<>(inner, keySerde, new ValueAndTimestampSerde<>(valueSerde));
+        return new CachingKeyValueStore<K, V, ValueAndTimestamp<V>>(
+            inner,
+            keySerde,
+            defaultSerde -> valueSerde != null ? new ValueAndTimestampSerde<>(valueSerde) : new ValueAndTimestampSerde<>(defaultSerde));
     }
 
     private KeyValueStore<Bytes, byte[]> maybeWrapLogging(final KeyValueStore<Bytes, byte[]> inner) {
@@ -122,6 +126,9 @@ public class KeyValueWithTimestampStoreBuilder<K, V> extends AbstractStoreBuilde
         @Override
         public byte[] serialize(final String topic,
                                 final ValueAndTimestamp<V> data) {
+            if (data == null) {
+                return null;
+            }
             final byte[] rawTimestamp = timestampSerializer.serialize(topic, data.timestamp());
             final byte[] rawValue = valueSerializer.serialize(topic, data.value());
             final byte[] rawValueAndTimestamp = new byte[rawTimestamp.length + rawValue.length];
@@ -156,6 +163,9 @@ public class KeyValueWithTimestampStoreBuilder<K, V> extends AbstractStoreBuilde
         @Override
         public ValueAndTimestamp<V> deserialize(final String topic,
                                                 final byte[] data) {
+            if (data == null) {
+                return null;
+            }
             final long timestamp = timestampDeserializer.deserialize(topic, Arrays.copyOfRange(data, 0, 8));
             final V value = valueDeserializer.deserialize(topic, Arrays.copyOfRange(data, 8, data.length));
             return new ValueAndTimestampImpl<>(value, timestamp);

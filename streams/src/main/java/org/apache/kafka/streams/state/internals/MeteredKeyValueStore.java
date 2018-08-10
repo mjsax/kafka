@@ -49,7 +49,7 @@ public class MeteredKeyValueStore<K, V> extends WrappedStateStore.AbstractStateS
 
     private final KeyValueStore<Bytes, byte[]> inner;
     private final Serde<K> keySerde;
-    private final Serde<V> valueSerde;
+    private final SerdeSupplier<V, V> valueSerdeSupplier;
     private StateSerdes<K, V> serdes;
 
     private final String metricScope;
@@ -69,16 +69,16 @@ public class MeteredKeyValueStore<K, V> extends WrappedStateStore.AbstractStateS
                          final String metricScope,
                          final Time time,
                          final Serde<K> keySerde,
-                         final Serde<V> valueSerde) {
+                         final SerdeSupplier<V, V> valueSerdeSupplier) {
         super(inner);
         this.inner = inner;
         this.metricScope = metricScope;
         this.time = time != null ? time : Time.SYSTEM;
         this.keySerde = keySerde;
-        this.valueSerde = valueSerde;
+        this.valueSerdeSupplier = valueSerdeSupplier;
     }
 
-    @SuppressWarnings("unchecked")
+    //@SuppressWarnings("unchecked")
     @Override
     public void init(final ProcessorContext context,
                      final StateStore root) {
@@ -92,7 +92,7 @@ public class MeteredKeyValueStore<K, V> extends WrappedStateStore.AbstractStateS
         this.serdes = new StateSerdes<>(
             ProcessorStateManager.storeChangelogTopic(context.applicationId(), name()),
             keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-            valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
+            valueSerdeSupplier.get((Serde<V>) context.valueSerde()));
 
         putTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "put", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
         putIfAbsentTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "put-if-absent", metrics, metricsGroup, taskName, name(), taskTags, storeTags);

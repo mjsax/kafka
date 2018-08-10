@@ -26,6 +26,7 @@ import org.apache.kafka.streams.kstream.Merger;
 import org.apache.kafka.streams.kstream.SessionWindows;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.processor.Processor;
+import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
 import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
 import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
@@ -33,7 +34,9 @@ import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.SessionStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.internals.ThreadCache;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.apache.kafka.test.InternalMockProcessorContext;
 import org.apache.kafka.test.NoOpRecordCollector;
 import org.apache.kafka.test.TestUtils;
@@ -58,24 +61,9 @@ public class KStreamSessionWindowAggregateProcessorTest {
     private static final long GAP_MS = 5 * 60 * 1000L;
     private static final String STORE_NAME = "session-store";
 
-    private final Initializer<Long> initializer = new Initializer<Long>() {
-        @Override
-        public Long apply() {
-            return 0L;
-        }
-    };
-    private final Aggregator<String, String, Long> aggregator = new Aggregator<String, String, Long>() {
-        @Override
-        public Long apply(final String aggKey, final String value, final Long aggregate) {
-            return aggregate + 1;
-        }
-    };
-    private final Merger<String, Long> sessionMerger = new Merger<String, Long>() {
-        @Override
-        public Long apply(final String aggKey, final Long aggOne, final Long aggTwo) {
-            return aggOne + aggTwo;
-        }
-    };
+    private final Initializer<Long> initializer = () -> 0L;
+    private final Aggregator<String, String, Long> aggregator = (aggKey, value, aggregate) -> aggregate + 1;
+    private final Merger<String, Long> sessionMerger = (aggKey, aggOne, aggTwo) -> aggOne + aggTwo;
     private final KStreamSessionWindowAggregate<String, String, Long> sessionAggregator =
         new KStreamSessionWindowAggregate<>(
             SessionWindows.with(GAP_MS).until(3 * GAP_MS),
@@ -98,6 +86,21 @@ public class KStreamSessionWindowAggregateProcessorTest {
             @Override
             public <K, V> void forward(final K key, final V value) {
                 results.add(KeyValue.pair(key, value));
+            }
+
+            @Override
+            public <K, V> void forward(final K key, final V value, final To to) {
+                results.add(KeyValue.pair(key, value));
+            }
+
+            @Override
+            public <K, V> void forward(final K key, final V value, final int childIndex) {
+                throw new UnsupportedOperationException("This method is deprecated");
+            }
+
+            @Override
+            public <K, V> void forward(final K key, final V value, final String childName) {
+                throw new UnsupportedOperationException("This method is deprecated");
             }
         };
 
@@ -258,10 +261,10 @@ public class KStreamSessionWindowAggregateProcessorTest {
         context.setTime(GAP_MS + 1);
         processor.process("a", "1");
         processor.process("a", "2");
-        final long t0 = getter.get(new Windowed<>("a", new SessionWindow(0, 0)));
-        final long t1 = getter.get(new Windowed<>("a", new SessionWindow(GAP_MS + 1, GAP_MS + 1)));
-        assertEquals(1L, t0);
-        assertEquals(2L, t1);
+        final ValueAndTimestamp<Long> t0 = getter.get(new Windowed<>("a", new SessionWindow(0, 0)));
+        final ValueAndTimestamp<Long> t1 = getter.get(new Windowed<>("a", new SessionWindow(GAP_MS + 1, GAP_MS + 1)));
+        assertEquals(new ValueAndTimestampImpl<>(1L, 0L), t0);
+        assertEquals(new ValueAndTimestampImpl<>(2L, 0L), t1);
     }
 
     @Test

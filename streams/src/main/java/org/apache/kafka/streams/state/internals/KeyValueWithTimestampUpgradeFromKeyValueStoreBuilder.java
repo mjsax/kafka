@@ -67,7 +67,7 @@ public class KeyValueWithTimestampUpgradeFromKeyValueStoreBuilder<K, V>
                 storeSupplier.metricsScope(),
                 time,
                 Serdes.Bytes(),
-                Serdes.ByteArray()),
+                defaultSerde -> Serdes.ByteArray()),
             storeSupplier.metricsScope(),
             time,
             keySerde,

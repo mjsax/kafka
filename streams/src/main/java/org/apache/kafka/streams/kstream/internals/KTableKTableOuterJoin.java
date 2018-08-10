@@ -20,7 +20,10 @@ import org.apache.kafka.streams.kstream.ValueJoiner;
 import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,20 +89,32 @@ class KTableKTableOuterJoin<K, R, V1, V2> extends KTableKTableAbstractJoin<K, R,
             R newValue = null;
             R oldValue = null;
 
-            final V2 value2 = valueGetter.get(key);
-            if (value2 == null && change.newValue == null && change.oldValue == null) {
-                return;
+            final ValueAndTimestamp<V2> value2 = valueGetter.get(key);
+            final V2 plainValue2;
+            final long resultTimestamp;
+            if (value2 == null) {
+                if (change.newValue == null && change.oldValue == null) {
+                    return;
+                }
+                plainValue2 = null;
+                resultTimestamp = context().timestamp();
+            } else {
+                plainValue2 = value2.value();
+                resultTimestamp = Math.max(context().timestamp(), value2.timestamp());
             }
 
-            if (value2 != null || change.newValue != null) {
-                newValue = joiner.apply(change.newValue, value2);
+            if (plainValue2 != null || change.newValue != null) {
+                newValue = joiner.apply(change.newValue, plainValue2);
             }
 
-            if (sendOldValues && (value2 != null || change.oldValue != null)) {
-                oldValue = joiner.apply(change.oldValue, value2);
+            if (sendOldValues && (plainValue2 != null || change.oldValue != null)) {
+                oldValue = joiner.apply(change.oldValue, plainValue2);
             }
 
-            context().forward(key, new Change<>(newValue, oldValue));
+            context().forward(
+                key,
+                new Change<>(newValue, oldValue),
+                To.all().withTimestamp(resultTimestamp));
         }
 
         @Override
@@ -126,13 +141,33 @@ class KTableKTableOuterJoin<K, R, V1, V2> extends KTableKTableAbstractJoin<K, R,
         }
 
         @Override
-        public R get(final K key) {
-            R newValue = null;
-            final V1 value1 = valueGetter1.get(key);
-            final V2 value2 = valueGetter2.get(key);
+        public ValueAndTimestamp<R> get(final K key) {
+            ValueAndTimestamp<R> newValue = null;
+            long resultTimestamp = -1;
 
-            if (value1 != null || value2 != null) {
-                newValue = joiner.apply(value1, value2);
+            final ValueAndTimestamp<V1> value1 = valueGetter1.get(key);
+            final ValueAndTimestamp<V2> value2 = valueGetter2.get(key);
+
+            final V1 plainValue1;
+            final V2 plainValue2;
+            if (value1 != null) {
+                plainValue1 = value1.value();
+                resultTimestamp = value1.timestamp();
+            } else {
+                plainValue1 = null;
+            }
+            if (value2 != null) {
+                plainValue2 = value2.value();
+                resultTimestamp = Math.max(resultTimestamp, value2.timestamp());
+            } else {
+                plainValue2 = null;
+            }
+
+            if (resultTimestamp != -1) {
+                final R joined = joiner.apply(plainValue1, plainValue2);
+                if (joined != null) {
+                    newValue = new ValueAndTimestampImpl<>(joined, resultTimestamp);
+                }
             }
 
             return newValue;

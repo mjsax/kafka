@@ -22,6 +22,8 @@ import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 
 /**
  * KTable repartition map functions are not exposed to public APIs, but only used for keyed aggregations.
@@ -101,6 +103,7 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableProcessorSuppli
     private class KTableMapValueGetter implements KTableValueGetter<K, KeyValue<K1, V1>> {
 
         private final KTableValueGetter<K, V> parentGetter;
+        private ProcessorContext context;
 
         KTableMapValueGetter(final KTableValueGetter<K, V> parentGetter) {
             this.parentGetter = parentGetter;
@@ -108,12 +111,15 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableProcessorSuppli
 
         @Override
         public void init(final ProcessorContext context) {
+            this.context = context;
             parentGetter.init(context);
         }
 
         @Override
-        public KeyValue<K1, V1> get(final K key) {
-            return mapper.apply(key, parentGetter.get(key));
+        public ValueAndTimestamp<KeyValue<K1, V1>> get(final K key) {
+            final ValueAndTimestamp<V> value = parentGetter.get(key);
+            final KeyValue<K1, V1> keyValue = mapper.apply(key, value == null ? null : value.value());
+            return keyValue == null ? null : new ValueAndTimestampImpl<>(keyValue, context.timestamp());
         }
 
         @Override

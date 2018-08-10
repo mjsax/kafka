@@ -53,8 +53,9 @@ public class MeteredKeyValueWithTimestampStore<K, V> extends WrappedStateStore.A
 
     private final KeyValueStore<Bytes, byte[]> inner;
     private final Serde<K> keySerde;
-    private final Serde<V> valueSerde;
-    private StateSerdes<K, V> serdes;
+    private Serde<V> valueSerde;
+    private final SerdeSupplier<V, ValueAndTimestamp<V>> valueSerdeSupplier;
+    private StateSerdes<K, ValueAndTimestamp<V>> serdes;
     private final LongSerializer longSerializer = new LongSerializer();
     private final LongDeserializer longDeserializer = new LongDeserializer();
 
@@ -75,30 +76,35 @@ public class MeteredKeyValueWithTimestampStore<K, V> extends WrappedStateStore.A
                                       final String metricScope,
                                       final Time time,
                                       final Serde<K> keySerde,
-                                      final Serde<V> valueSerde) {
+                                      final Serde<V> valueSerde,
+                                      final SerdeSupplier<V, ValueAndTimestamp<V>> valueSerdeSupplier) {
         super(inner);
         this.inner = inner;
         this.metricScope = metricScope;
         this.time = time != null ? time : Time.SYSTEM;
         this.keySerde = keySerde;
         this.valueSerde = valueSerde;
+        this.valueSerdeSupplier = valueSerdeSupplier;
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public void init(final ProcessorContext context,
                      final StateStore root) {
-        this.metrics = (StreamsMetricsImpl) context.metrics();
+        metrics = (StreamsMetricsImpl) context.metrics();
 
         taskName = context.taskId().toString();
         final String metricsGroup = "stream-" + metricScope + "-metrics";
         final Map<String, String> taskTags = metrics.tagMap("task-id", taskName, metricScope + "-id", "all");
         final Map<String, String> storeTags = metrics.tagMap("task-id", taskName, metricScope + "-id", name());
 
-        this.serdes = new StateSerdes<>(
+        if (valueSerde == null) {
+            valueSerde = (Serde<V>) context.valueSerde();
+        }
+        serdes = new StateSerdes<>(
             ProcessorStateManager.storeChangelogTopic(context.applicationId(), name()),
             keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-            valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
+            valueSerdeSupplier.get(valueSerde));
 
         putTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "put", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
         putIfAbsentTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "put-if-absent", metrics, metricsGroup, taskName, name(), taskTags, storeTags);

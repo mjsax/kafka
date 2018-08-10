@@ -181,8 +181,6 @@ public class TopologyTestDriver implements Closeable {
     private final GlobalStateUpdateTask globalStateTask;
     private final GlobalStateManager globalStateManager;
 
-    private final InternalProcessorContext context;
-
     private final StateDirectory stateDirectory;
     private final Metrics metrics;
     final ProcessorTopology processorTopology;
@@ -322,6 +320,7 @@ public class TopologyTestDriver implements Closeable {
             globalStateTask = null;
         }
 
+        final InternalProcessorContext context;
         if (!partitionsByTopic.isEmpty()) {
             task = new StreamTask(
                 TASK_ID,
@@ -346,7 +345,6 @@ public class TopologyTestDriver implements Closeable {
             context.setRecordContext(new ProcessorRecordContext(0L, -1L, -1, null, new RecordHeaders()));
         } else {
             task = null;
-            context = null;
         }
         eosEnabled = streamsConfig.getString(StreamsConfig.PROCESSING_GUARANTEE_CONFIG).equals(StreamsConfig.EXACTLY_ONCE);
     }

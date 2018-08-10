@@ -23,17 +23,10 @@ import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
-import org.apache.kafka.streams.kstream.Aggregator;
 import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.kstream.ForeachAction;
-import org.apache.kafka.streams.kstream.Initializer;
 import org.apache.kafka.streams.kstream.KTable;
-import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.kstream.Reducer;
 import org.apache.kafka.streams.kstream.Serialized;
-import org.apache.kafka.streams.kstream.ValueJoiner;
-import org.apache.kafka.streams.kstream.ValueMapper;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.test.KStreamTestDriver;
 import org.apache.kafka.test.MockAggregator;
@@ -124,7 +117,7 @@ public class KTableAggregateTest {
         final String topic1 = "topic1";
 
         final KTable<String, String> table1 = builder.table(topic1, consumed);
-        final KTable<String, String> table2 = table1.groupBy(MockMapper.<String, String>noOpKeyValueMapper(),
+        final KTable<String, String> table2 = table1.groupBy(MockMapper.noOpKeyValueMapper(),
                                                              stringSerialzied
         ).aggregate(MockInitializer.STRING_INIT,
             MockAggregator.TOSTRING_ADDER,
@@ -151,17 +144,14 @@ public class KTableAggregateTest {
 
         final KTable<String, String> table1 = builder.table(topic1, consumed);
         final KTable<String, String> table2 = table1.groupBy(
-            new KeyValueMapper<String, String, KeyValue<String, String>>() {
-                @Override
-                public KeyValue<String, String> apply(final String key, final String value) {
-                    switch (key) {
-                        case "null":
-                            return KeyValue.pair(null, value);
-                        case "NULL":
-                            return null;
-                        default:
-                            return KeyValue.pair(value, value);
-                    }
+            (key, value) -> {
+                switch (key) {
+                    case "null":
+                        return KeyValue.pair(null, value);
+                    case "NULL":
+                        return null;
+                    default:
+                        return KeyValue.pair(value, value);
                 }
             },
             stringSerialzied
@@ -235,8 +225,8 @@ public class KTableAggregateTest {
         final String input = "count-test-input";
 
         builder.table(input, consumed)
-                .groupBy(MockMapper.<String, String>selectValueKeyValueMapper(), stringSerialzied)
-                .count(Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("count"))
+                .groupBy(MockMapper.selectValueKeyValueMapper(), stringSerialzied)
+                .count(Materialized.as("count"))
                 .toStream()
                 .process(supplier);
 
@@ -249,7 +239,7 @@ public class KTableAggregateTest {
         final String input = "count-test-input";
 
         builder.table(input, consumed)
-            .groupBy(MockMapper.<String, String>selectValueKeyValueMapper(), stringSerialzied)
+            .groupBy(MockMapper.selectValueKeyValueMapper(), stringSerialzied)
             .count()
             .toStream()
             .process(supplier);
@@ -264,8 +254,8 @@ public class KTableAggregateTest {
         final MockProcessorSupplier<String, Long> supplier = new MockProcessorSupplier<>();
 
         builder.table(input, consumed)
-            .groupBy(MockMapper.<String, String>selectValueKeyValueMapper(), stringSerialzied)
-            .count(Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("count"))
+            .groupBy(MockMapper.selectValueKeyValueMapper(), stringSerialzied)
+            .count(Materialized.as("count"))
             .toStream()
             .process(supplier);
 
@@ -295,32 +285,12 @@ public class KTableAggregateTest {
         final MockProcessorSupplier<String, String> supplier = new MockProcessorSupplier<>();
 
         builder.table(input, consumed)
-                .groupBy(new KeyValueMapper<String, String, KeyValue<String, String>>() {
-
-                    @Override
-                    public KeyValue<String, String> apply(final String key, final String value) {
-                        return KeyValue.pair(String.valueOf(key.charAt(0)), String.valueOf(key.charAt(1)));
-                    }
-                }, stringSerialzied)
-                .aggregate(new Initializer<String>() {
-
-                    @Override
-                    public String apply() {
-                        return "";
-                    }
-                }, new Aggregator<String, String, String>() {
-
-                    @Override
-                    public String apply(final String aggKey, final String value, final String aggregate) {
-                        return aggregate + value;
-                    }
-                }, new Aggregator<String, String, String>() {
-
-                    @Override
-                    public String apply(final String key, final String value, final String aggregate) {
-                        return aggregate.replaceAll(value, "");
-                    }
-                }, Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as("someStore").withValueSerde(Serdes.String()))
+                .groupBy((key, value) -> KeyValue.pair(String.valueOf(key.charAt(0)), String.valueOf(key.charAt(1))), stringSerialzied)
+                .aggregate(
+                    () -> "",
+                    (aggKey, value, aggregate) -> aggregate + value,
+                    (key, value, aggregate) -> aggregate.replaceAll(value, ""),
+                    Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as("someStore").withValueSerde(Serdes.String()))
                 .toStream()
                 .process(supplier);
 
@@ -357,43 +327,16 @@ public class KTableAggregateTest {
         final KTable<Long, String> two = builder.table(tableTwo, Consumed.with(Serdes.Long(), Serdes.String()));
 
 
-        final KTable<String, Long> reduce = two.groupBy(new KeyValueMapper<Long, String, KeyValue<String, Long>>() {
-            @Override
-            public KeyValue<String, Long> apply(final Long key, final String value) {
-                return new KeyValue<>(value, key);
-            }
-        }, Serialized.with(Serdes.String(), Serdes.Long()))
-                .reduce(new Reducer<Long>() {
-                    @Override
-                    public Long apply(final Long value1, final Long value2) {
-                        return value1 + value2;
-                    }
-                }, new Reducer<Long>() {
-                    @Override
-                    public Long apply(final Long value1, final Long value2) {
-                        return value1 - value2;
-                    }
-                }, Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("reducer-store"));
+        final KTable<String, Long> reduce = two.groupBy((key, value) -> new KeyValue<>(value, key), Serialized.with(Serdes.String(), Serdes.Long()))
+                .reduce(
+                    (value1, value2) -> value1 + value2,
+                    (value1, value2) -> value1 - value2,
+                    Materialized.as("reducer-store"));
 
-        reduce.toStream().foreach(new ForeachAction<String, Long>() {
-            @Override
-            public void apply(final String key, final Long value) {
-                reduceResults.put(key, value);
-            }
-        });
+        reduce.toStream().foreach(reduceResults::put);
 
-        one.leftJoin(reduce, new ValueJoiner<String, Long, String>() {
-            @Override
-            public String apply(final String value1, final Long value2) {
-                return value1 + ":" + value2;
-            }
-        })
-                .mapValues(new ValueMapper<String, String>() {
-                    @Override
-                    public String apply(final String value) {
-                        return value;
-                    }
-                });
+        one.leftJoin(reduce, (value1, value2) -> value1 + ":" + value2)
+            .mapValues(value -> value);
 
         driver.setUp(builder, stateDir, 111);
         driver.process(reduceTopic, "1", new Change<>(1L, null));

@@ -35,27 +35,27 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-class CachingKeyValueStore<K, V> extends WrappedStateStore.AbstractStateStore implements KeyValueStore<Bytes, byte[]>, CachedStateStore<K, V> {
+class CachingKeyValueStore<K, V, W> extends WrappedStateStore.AbstractStateStore implements KeyValueStore<Bytes, byte[]>, CachedStateStore<K, W> {
 
     private final KeyValueStore<Bytes, byte[]> underlying;
     private final Serde<K> keySerde;
-    private final Serde<V> valueSerde;
-    private CacheFlushListener<K, V> flushListener;
+    private final SerdeSupplier<V, W> valueSerdeSupplier;
+    private CacheFlushListener<K, W> flushListener;
     private boolean sendOldValues;
     private String cacheName;
     private ThreadCache cache;
     private InternalProcessorContext context;
-    private StateSerdes<K, V> serdes;
+    private StateSerdes<K, W> serdes;
     private Thread streamThread;
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     CachingKeyValueStore(final KeyValueStore<Bytes, byte[]> underlying,
                          final Serde<K> keySerde,
-                         final Serde<V> valueSerde) {
+                         final SerdeSupplier<V, W> valueSerdeSupplier) {
         super(underlying);
         this.underlying = underlying;
         this.keySerde = keySerde;
-        this.valueSerde = valueSerde;
+        this.valueSerdeSupplier = valueSerdeSupplier;
     }
 
     @Override
@@ -67,21 +67,19 @@ class CachingKeyValueStore<K, V> extends WrappedStateStore.AbstractStateStore im
         streamThread = Thread.currentThread();
     }
 
-    @SuppressWarnings("unchecked")
+    //@SuppressWarnings("unchecked")
     private void initInternal(final ProcessorContext context) {
         this.context = (InternalProcessorContext) context;
-        this.serdes = new StateSerdes<>(ProcessorStateManager.storeChangelogTopic(context.applicationId(), underlying.name()),
-                                        keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-                                        valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
+        serdes = new StateSerdes<>(
+            ProcessorStateManager.storeChangelogTopic(context.applicationId(), underlying.name()),
+            keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
+            valueSerdeSupplier.get((Serde<V>) context.valueSerde()));
 
-        this.cache = this.context.getCache();
-        this.cacheName = ThreadCache.nameSpaceFromTaskIdAndStore(context.taskId().toString(), underlying.name());
-        cache.addDirtyEntryFlushListener(cacheName, new ThreadCache.DirtyEntryFlushListener() {
-            @Override
-            public void apply(final List<ThreadCache.DirtyEntry> entries) {
-                for (final ThreadCache.DirtyEntry entry : entries) {
-                    putAndMaybeForward(entry, (InternalProcessorContext) context);
-                }
+        cache = this.context.getCache();
+        cacheName = ThreadCache.nameSpaceFromTaskIdAndStore(context.taskId().toString(), underlying.name());
+        cache.addDirtyEntryFlushListener(cacheName, entries -> {
+            for (final ThreadCache.DirtyEntry entry : entries) {
+                putAndMaybeForward(entry, (InternalProcessorContext) context);
             }
         });
     }
@@ -91,16 +89,17 @@ class CachingKeyValueStore<K, V> extends WrappedStateStore.AbstractStateStore im
         try {
             context.setRecordContext(entry.recordContext());
             if (flushListener != null) {
-                V oldValue = null;
+                W oldValue = null;
                 if (sendOldValues) {
                     final byte[] oldBytesValue = underlying.get(entry.key());
                     oldValue = oldBytesValue == null ? null : serdes.valueFrom(oldBytesValue);
                 }
                 // we rely on underlying store to handle null new value bytes as deletes
                 underlying.put(entry.key(), entry.newValue());
-                flushListener.apply(serdes.keyFrom(entry.key().get()),
-                                    serdes.valueFrom(entry.newValue()),
-                                    oldValue);
+                flushListener.apply(
+                    serdes.keyFrom(entry.key().get()),
+                    serdes.valueFrom(entry.newValue()),
+                    oldValue);
             } else {
                 underlying.put(entry.key(), entry.newValue());
             }
@@ -109,7 +108,7 @@ class CachingKeyValueStore<K, V> extends WrappedStateStore.AbstractStateStore im
         }
     }
 
-    public void setFlushListener(final CacheFlushListener<K, V> flushListener,
+    public void setFlushListener(final CacheFlushListener<K, W> flushListener,
                                  final boolean sendOldValues) {
 
         this.flushListener = flushListener;

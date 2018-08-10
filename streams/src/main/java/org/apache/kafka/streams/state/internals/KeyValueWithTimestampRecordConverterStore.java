@@ -31,7 +31,12 @@ public class KeyValueWithTimestampRecordConverterStore<K, V> extends MeteredKeyV
                                               final Time time,
                                               final Serde<K> keySerde,
                                               final Serde<V> valueSerde) {
-        super(innerByteStore, metricScope, time, keySerde, valueSerde);
+        super(innerByteStore,
+            metricScope,
+            time,
+            keySerde,
+            valueSerde,
+            KeyValueWithTimestampStoreBuilder.ValueAndTimestampSerde::new);
     }
 
     @Override

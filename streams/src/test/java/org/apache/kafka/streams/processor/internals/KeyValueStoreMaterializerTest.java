@@ -26,11 +26,12 @@ import org.apache.kafka.streams.kstream.internals.MaterializedInternal;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.KeyValueWithTimestampStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.internals.CachedStateStore;
 import org.apache.kafka.streams.state.internals.ChangeLoggingKeyValueBytesStore;
 import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
-import org.apache.kafka.streams.state.internals.MeteredKeyValueStore;
+import org.apache.kafka.streams.state.internals.MeteredKeyValueWithTimestampStore;
 import org.apache.kafka.streams.state.internals.WrappedStateStore;
 import org.easymock.EasyMock;
 import org.easymock.EasyMockRunner;
@@ -58,11 +59,11 @@ public class KeyValueStoreMaterializerTest {
         materialized.generateStoreNameIfNeeded(nameProvider, storePrefix);
 
         final KeyValueStoreMaterializer<String, String> materializer = new KeyValueStoreMaterializer<>(materialized);
-        final StoreBuilder<KeyValueStore<String, String>> builder = materializer.materialize();
-        final KeyValueStore<String, String> store = builder.build();
+        final StoreBuilder<KeyValueWithTimestampStore<String, String>> builder = materializer.materialize();
+        final KeyValueWithTimestampStore<String, String> store = builder.build();
         final WrappedStateStore caching = (WrappedStateStore) ((WrappedStateStore) store).wrappedStore();
         final StateStore logging = caching.wrappedStore();
-        assertThat(store, instanceOf(MeteredKeyValueStore.class));
+        assertThat(store, instanceOf(MeteredKeyValueWithTimestampStore.class));
         assertThat(caching, instanceOf(CachedStateStore.class));
         assertThat(logging, instanceOf(ChangeLoggingKeyValueBytesStore.class));
     }
@@ -74,8 +75,8 @@ public class KeyValueStoreMaterializerTest {
         );
         materialized.generateStoreNameIfNeeded(nameProvider, storePrefix);
         final KeyValueStoreMaterializer<String, String> materializer = new KeyValueStoreMaterializer<>(materialized);
-        final StoreBuilder<KeyValueStore<String, String>> builder = materializer.materialize();
-        final KeyValueStore<String, String> store = builder.build();
+        final StoreBuilder<KeyValueWithTimestampStore<String, String>> builder = materializer.materialize();
+        final KeyValueWithTimestampStore<String, String> store = builder.build();
         final WrappedStateStore logging = (WrappedStateStore) ((WrappedStateStore) store).wrappedStore();
         assertThat(logging, instanceOf(ChangeLoggingKeyValueBytesStore.class));
     }
@@ -88,8 +89,8 @@ public class KeyValueStoreMaterializerTest {
         );
         materialized.generateStoreNameIfNeeded(nameProvider, storePrefix);
         final KeyValueStoreMaterializer<String, String> materializer = new KeyValueStoreMaterializer<>(materialized);
-        final StoreBuilder<KeyValueStore<String, String>> builder = materializer.materialize();
-        final KeyValueStore<String, String> store = builder.build();
+        final StoreBuilder<KeyValueWithTimestampStore<String, String>> builder = materializer.materialize();
+        final KeyValueWithTimestampStore<String, String> store = builder.build();
         final WrappedStateStore caching = (WrappedStateStore) ((WrappedStateStore) store).wrappedStore();
         assertThat(caching, instanceOf(CachedStateStore.class));
         assertThat(caching.wrappedStore(), not(instanceOf(ChangeLoggingKeyValueBytesStore.class)));
@@ -103,8 +104,8 @@ public class KeyValueStoreMaterializerTest {
                                                      .withLoggingDisabled());
         materialized.generateStoreNameIfNeeded(nameProvider, storePrefix);
         final KeyValueStoreMaterializer<String, String> materializer = new KeyValueStoreMaterializer<>(materialized);
-        final StoreBuilder<KeyValueStore<String, String>> builder = materializer.materialize();
-        final KeyValueStore<String, String> store = builder.build();
+        final StoreBuilder<KeyValueWithTimestampStore<String, String>> builder = materializer.materialize();
+        final KeyValueWithTimestampStore<String, String> store = builder.build();
         final StateStore wrapped = ((WrappedStateStore) store).wrappedStore();
         assertThat(wrapped, not(instanceOf(CachedStateStore.class)));
         assertThat(wrapped, not(instanceOf(ChangeLoggingKeyValueBytesStore.class)));
@@ -122,8 +123,8 @@ public class KeyValueStoreMaterializerTest {
             new MaterializedInternal<>(Materialized.as(supplier));
         materialized.generateStoreNameIfNeeded(nameProvider, storePrefix);
         final KeyValueStoreMaterializer<String, Integer> materializer = new KeyValueStoreMaterializer<>(materialized);
-        final StoreBuilder<KeyValueStore<String, Integer>> builder = materializer.materialize();
-        final KeyValueStore<String, Integer> built = builder.build();
+        final StoreBuilder<KeyValueWithTimestampStore<String, Integer>> builder = materializer.materialize();
+        final KeyValueWithTimestampStore<String, Integer> built = builder.build();
         final StateStore inner = ((WrappedStateStore) built).inner();
 
         assertThat(inner, CoreMatchers.<StateStore>equalTo(store));

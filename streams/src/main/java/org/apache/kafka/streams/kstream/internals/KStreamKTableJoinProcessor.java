@@ -20,7 +20,9 @@ import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.kstream.ValueJoiner;
 import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,9 +70,19 @@ class KStreamKTableJoinProcessor<K1, K2, V1, V2, R> extends AbstractProcessor<K1
             metrics.skippedRecordsSensor().record();
         } else {
             final K2 mappedKey = keyMapper.apply(key, value);
-            final V2 value2 = mappedKey == null ? null : valueGetter.get(mappedKey);
-            if (leftJoin || value2 != null) {
-                context().forward(key, joiner.apply(value, value2));
+            final ValueAndTimestamp<V2> value2 = mappedKey == null ? null : valueGetter.get(mappedKey);
+            final V2 plainValue2;
+            final long resultTimestamp;
+            if (value2 != null ) {
+                plainValue2 = value2.value();
+                resultTimestamp = Math.max(context().timestamp(), value2.timestamp());
+            } else {
+                plainValue2 = null;
+                resultTimestamp = context().timestamp();
+            }
+
+            if (leftJoin || plainValue2 != null) {
+                context().forward(key, joiner.apply(value, plainValue2), To.all().withTimestamp(resultTimestamp));
             }
         }
     }

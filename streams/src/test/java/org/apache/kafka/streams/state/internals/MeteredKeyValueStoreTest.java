@@ -78,7 +78,7 @@ public class MeteredKeyValueStoreTest {
             "scope",
             new MockTime(),
             Serdes.String(),
-            Serdes.String()
+            defaultSerde -> Serdes.String()
         );
         metrics.config().recordLevel(Sensor.RecordingLevel.DEBUG);
         EasyMock.expect(context.metrics()).andReturn(new MockStreamsMetrics(metrics));

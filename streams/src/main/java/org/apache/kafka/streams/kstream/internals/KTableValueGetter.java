@@ -17,12 +17,13 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
 
 public interface KTableValueGetter<K, V> {
 
-    void init(ProcessorContext context);
+    void init(final ProcessorContext context);
 
-    V get(K key);
+    ValueAndTimestamp<V> get(final K key);
 
     void close();
 }

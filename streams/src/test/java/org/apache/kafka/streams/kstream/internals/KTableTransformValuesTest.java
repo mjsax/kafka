@@ -35,8 +35,11 @@ import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.internals.ForwardingDisabledProcessorContext;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.KeyValueWithTimestampStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.MockReducer;
@@ -90,7 +93,7 @@ public class KTableTransformValuesTest {
     @Mock(MockType.NICE)
     private KTableValueGetter<String, String> parentGetter;
     @Mock(MockType.NICE)
-    private KeyValueStore<String, String> stateStore;
+    private KeyValueWithTimestampStore<String, String> stateStore;
     @Mock(MockType.NICE)
     private ValueTransformerWithKeySupplier<String, String, String> mockSupplier;
     @Mock(MockType.NICE)
@@ -201,15 +204,15 @@ public class KTableTransformValuesTest {
 
         expect(parent.valueGetterSupplier()).andReturn(parentGetterSupplier);
         expect(parentGetterSupplier.get()).andReturn(parentGetter);
-        expect(parentGetter.get("Key")).andReturn("Value");
+        expect(parentGetter.get("Key")).andReturn(new ValueAndTimestampImpl<>("Value", 42L));
         replay(parent, parentGetterSupplier, parentGetter);
 
         final KTableValueGetter<String, String> getter = transformValues.view().get();
         getter.init(context);
 
-        final String result = getter.get("Key");
+        final ValueAndTimestamp<String> result = getter.get("Key");
 
-        assertThat(result, is("Key->Value!"));
+        assertThat(result, is(new ValueAndTimestampImpl<>("Key->Value!", 42L)));
     }
 
     @Test
@@ -218,15 +221,15 @@ public class KTableTransformValuesTest {
             new KTableTransformValues<>(parent, new ExclamationValueTransformerSupplier(), QUERYABLE_NAME);
 
         expect(context.getStateStore(QUERYABLE_NAME)).andReturn(stateStore);
-        expect(stateStore.get("Key")).andReturn("something");
+        expect(stateStore.get("Key")).andReturn(new ValueAndTimestampImpl<>("something", 42L));
         replay(context, stateStore);
 
         final KTableValueGetter<String, String> getter = transformValues.view().get();
         getter.init(context);
 
-        final String result = getter.get("Key");
+        final ValueAndTimestamp<String> result = getter.get("Key");
 
-        assertThat(result, is("something"));
+        assertThat(result, is(new ValueAndTimestampImpl<>("something", 42L)));
     }
 
     @Test
@@ -354,9 +357,9 @@ public class KTableTransformValuesTest {
         assertThat(output(), hasItems("A:A->a!", "B:B->b!", "C:C->null!"));
 
         final KeyValueStore<String, String> keyValueStore = driver.getKeyValueStore(QUERYABLE_NAME);
-        assertThat(keyValueStore.get("A"), is("A->a!"));
-        assertThat(keyValueStore.get("B"), is("B->b!"));
-        assertThat(keyValueStore.get("C"), is("C->null!"));
+        assertThat(keyValueStore.get("A"), is(new ValueAndTimestampImpl<>("A->a!", 0L)));
+        assertThat(keyValueStore.get("B"), is(new ValueAndTimestampImpl<>("B->b!", 0L)));
+        assertThat(keyValueStore.get("C"), is(new ValueAndTimestampImpl<>("C->null!", 0L)));
     }
 
     @Test
@@ -383,7 +386,7 @@ public class KTableTransformValuesTest {
         assertThat(output(), hasItems("A:1", "A:0", "A:2", "A:0", "A:3"));
 
         final KeyValueStore<String, Integer> keyValueStore = driver.getKeyValueStore(QUERYABLE_NAME);
-        assertThat(keyValueStore.get("A"), is(3));
+        assertThat(keyValueStore.get("A"), is(new ValueAndTimestampImpl<>(3, 0L)));
     }
 
     @Test
@@ -411,21 +414,11 @@ public class KTableTransformValuesTest {
     }
 
     private static KeyValueMapper<String, Integer, KeyValue<String, Integer>> toForceSendingOfOldValues() {
-        return new KeyValueMapper<String, Integer, KeyValue<String, Integer>>() {
-            @Override
-            public KeyValue<String, Integer> apply(final String key, final Integer value) {
-                return new KeyValue<>(key, value);
-            }
-        };
+        return KeyValue::new;
     }
 
     private static ValueMapper<Integer, String> mapBackToStrings() {
-        return new ValueMapper<Integer, String>() {
-            @Override
-            public String apply(final Integer value) {
-                return value.toString();
-            }
-        };
+        return Object::toString;
     }
 
     private static StoreBuilder<KeyValueStore<Long, Long>> storeBuilder(final String storeName) {

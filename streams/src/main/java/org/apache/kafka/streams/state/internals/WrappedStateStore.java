@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
@@ -24,6 +25,10 @@ import org.apache.kafka.streams.processor.StateStore;
  * A storage engine wrapper for utilities like logging, caching, and metering.
  */
 public interface WrappedStateStore extends StateStore {
+
+    interface SerdeSupplier<V, W> {
+        Serde<W> get(final Serde<V> defaultSerde);
+    }
 
     /**
      * Return the inner most storage engine

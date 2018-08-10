@@ -19,8 +19,9 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
 
-class ForwardingCacheFlushListener<K, V> implements CacheFlushListener<K, V> {
+class ForwardingCacheFlushListener<K, V> implements CacheFlushListener<K, ValueAndTimestamp<V>> {
     private final InternalProcessorContext context;
     private final boolean sendOldValues;
     private final ProcessorNode myNode;
@@ -32,14 +33,18 @@ class ForwardingCacheFlushListener<K, V> implements CacheFlushListener<K, V> {
     }
 
     @Override
-    public void apply(final K key, final V newValue, final V oldValue) {
+    public void apply(final K key, final ValueAndTimestamp<V> newValue, final ValueAndTimestamp<V> oldValue) {
         final ProcessorNode prev = context.currentNode();
         context.setCurrentNode(myNode);
         try {
             if (sendOldValues) {
-                context.forward(key, new Change<>(newValue, oldValue));
+                context.forward(
+                    key,
+                    new Change<>(
+                        newValue == null ? null : newValue.value(),
+                        oldValue == null ? null : oldValue.value()));
             } else {
-                context.forward(key, new Change<>(newValue, null));
+                context.forward(key, new Change<>(newValue == null ? null : newValue.value(), null));
             }
         } finally {
             context.setCurrentNode(prev);

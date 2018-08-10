@@ -19,7 +19,7 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.KeyValueWithTimestampStore;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -79,7 +79,7 @@ class KTableKTableJoinMerger<K, V> implements KTableProcessorSupplier<K, V, V> {
     }
 
     private class KTableKTableJoinMergeProcessor extends AbstractProcessor<K, Change<V>> {
-        private KeyValueStore<K, V> store;
+        private KeyValueWithTimestampStore<K, V> store;
         private TupleForwarder<K, V> tupleForwarder;
 
         @SuppressWarnings("unchecked")
@@ -87,8 +87,10 @@ class KTableKTableJoinMerger<K, V> implements KTableProcessorSupplier<K, V, V> {
         public void init(final ProcessorContext context) {
             super.init(context);
             if (queryableName != null) {
-                store = (KeyValueStore<K, V>) context.getStateStore(queryableName);
-                tupleForwarder = new TupleForwarder<>(store, context,
+                store = (KeyValueWithTimestampStore<K, V>) context.getStateStore(queryableName);
+                tupleForwarder = new TupleForwarder<>(
+                    store,
+                    context,
                     new ForwardingCacheFlushListener<K, V>(context, sendOldValues),
                     sendOldValues);
             }
@@ -97,7 +99,7 @@ class KTableKTableJoinMerger<K, V> implements KTableProcessorSupplier<K, V, V> {
         @Override
         public void process(final K key, final Change<V> value) {
             if (queryableName != null) {
-                store.put(key, value.newValue);
+                store.put(key, value.newValue, context().timestamp());
                 tupleForwarder.maybeForward(key, value.newValue, value.oldValue);
             } else {
                 context().forward(key, value);

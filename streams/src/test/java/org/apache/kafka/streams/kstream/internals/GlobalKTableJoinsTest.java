@@ -55,18 +55,8 @@ public class GlobalKTableJoinsTest {
         final Consumed<String, String> consumed = Consumed.with(Serdes.String(), Serdes.String());
         global = builder.globalTable(globalTopic, consumed);
         stream = builder.stream(streamTopic, consumed);
-        keyValueMapper = new KeyValueMapper<String, String, String>() {
-            @Override
-            public String apply(final String key, final String value) {
-                return value;
-            }
-        };
-        action = new ForeachAction<String, String>() {
-            @Override
-            public void apply(final String key, final String value) {
-                results.put(key, value);
-            }
-        };
+        keyValueMapper = (key, value) -> value;
+        action = results::put;
     }
 
     @Test
@@ -81,7 +71,6 @@ public class GlobalKTableJoinsTest {
         expected.put("3", "c+null");
 
         verifyJoin(expected);
-
     }
 
     @Test
@@ -103,12 +92,12 @@ public class GlobalKTableJoinsTest {
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             // write some data to the global table
-            driver.pipeInput(recordFactory.create(globalTopic, "a", "A"));
-            driver.pipeInput(recordFactory.create(globalTopic, "b", "B"));
+            driver.pipeInput(recordFactory.create(globalTopic, "a", "A", 0L));
+            driver.pipeInput(recordFactory.create(globalTopic, "b", "B", 0L));
             //write some data to the stream
-            driver.pipeInput(recordFactory.create(streamTopic, "1", "a"));
-            driver.pipeInput(recordFactory.create(streamTopic, "2", "b"));
-            driver.pipeInput(recordFactory.create(streamTopic, "3", "c"));
+            driver.pipeInput(recordFactory.create(streamTopic, "1", "a", 0L));
+            driver.pipeInput(recordFactory.create(streamTopic, "2", "b", 0L));
+            driver.pipeInput(recordFactory.create(streamTopic, "3", "c", 0L));
         }
 
         assertEquals(expected, results);

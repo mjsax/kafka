@@ -59,7 +59,7 @@ public class CachingKeyValueStoreTest extends AbstractKeyValueStoreTest {
 
     private final int maxCacheSizeBytes = 150;
     private InternalMockProcessorContext context;
-    private CachingKeyValueStore<String, String> store;
+    private CachingKeyValueStore<String, String, String> store;
     private InMemoryKeyValueStore<Bytes, byte[]> underlyingStore;
     private ThreadCache cache;
     private CacheFlushListenerStub<String, String> cacheFlushListener;
@@ -70,7 +70,7 @@ public class CachingKeyValueStoreTest extends AbstractKeyValueStoreTest {
         final String storeName = "store";
         underlyingStore = new InMemoryKeyValueStore<>(storeName, Serdes.Bytes(), Serdes.ByteArray());
         cacheFlushListener = new CacheFlushListenerStub<>();
-        store = new CachingKeyValueStore<>(underlyingStore, Serdes.String(), Serdes.String());
+        store = new CachingKeyValueStore<>(underlyingStore, Serdes.String(), defaultSerde -> Serdes.String());
         store.setFlushListener(cacheFlushListener, false);
         cache = new ThreadCache(new LogContext("testCache "), maxCacheSizeBytes, new MockStreamsMetrics(new Metrics()));
         context = new InternalMockProcessorContext(null, null, null, (RecordCollector) null, cache);

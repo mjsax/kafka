@@ -18,12 +18,15 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 
+import java.util.Objects;
+
 public class ValueAndTimestampImpl<V> implements ValueAndTimestamp<V> {
     private final V value;
     private final long timestamp;
 
     public ValueAndTimestampImpl(final V value,
                                  final long timestamp) {
+        Objects.requireNonNull(value);
         this.value = value;
         this.timestamp = timestamp;
     }
@@ -36,5 +39,27 @@ public class ValueAndTimestampImpl<V> implements ValueAndTimestamp<V> {
     @Override
     public long timestamp() {
         return timestamp;
+    }
+
+    @Override
+    public String toString() {
+        return value + "@" + timestamp;
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        final ValueAndTimestampImpl<?> that = (ValueAndTimestampImpl<?>) o;
+        return timestamp == that.timestamp && Objects.equals(value, that.value);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(value, timestamp);
     }
 }

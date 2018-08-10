@@ -21,7 +21,8 @@ import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.KeyValueWithTimestampStore;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +48,7 @@ public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
 
     private class KTableSourceProcessor extends AbstractProcessor<K, V> {
 
-        private KeyValueStore<K, V> store;
+        private KeyValueWithTimestampStore<K, V> store;
         private TupleForwarder<K, V> tupleForwarder;
         private StreamsMetricsImpl metrics;
 
@@ -56,7 +57,7 @@ public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
         public void init(final ProcessorContext context) {
             super.init(context);
             metrics = (StreamsMetricsImpl) context.metrics();
-            store = (KeyValueStore<K, V>) context.getStateStore(storeName);
+            store = (KeyValueWithTimestampStore<K, V>) context.getStateStore(storeName);
             tupleForwarder = new TupleForwarder<>(store, context, new ForwardingCacheFlushListener<K, V>(context, sendOldValues), sendOldValues);
         }
 
@@ -71,9 +72,15 @@ public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
                 metrics.skippedRecordsSensor().record();
                 return;
             }
-            final V oldValue = store.get(key);
-            store.put(key, value);
-            tupleForwarder.maybeForward(key, value, oldValue);
+            final ValueAndTimestamp<V> oldValue = store.get(key);
+            final V plainOldValue;
+            if (oldValue != null) {
+                plainOldValue = oldValue.value();
+            } else {
+                plainOldValue = null;
+            }
+            store.put(key, value, context().timestamp());
+            tupleForwarder.maybeForward(key, value, plainOldValue);
         }
     }
 }

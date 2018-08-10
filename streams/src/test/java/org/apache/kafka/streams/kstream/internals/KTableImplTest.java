@@ -29,9 +29,7 @@ import org.apache.kafka.streams.TopologyWrapper;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.kstream.Predicate;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.streams.kstream.ValueJoiner;
 import org.apache.kafka.streams.kstream.ValueMapper;
 import org.apache.kafka.streams.kstream.ValueMapperWithKey;
 import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
@@ -39,6 +37,7 @@ import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.processor.internals.SinkNode;
 import org.apache.kafka.streams.processor.internals.SourceNode;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockAggregator;
 import org.apache.kafka.test.MockInitializer;
@@ -67,12 +66,11 @@ public class KTableImplTest {
     private final Properties props = StreamsTestUtils.topologyTestConfig(Serdes.String(), Serdes.String());
     private final ConsumerRecordFactory<String, String> recordFactory = new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer());
 
-    private StreamsBuilder builder;
     private KTable<String, String> table;
 
     @Before
     public void setUp() {
-        builder = new StreamsBuilder();
+        final StreamsBuilder builder = new StreamsBuilder();
         table = builder.table("test");
     }
 
@@ -88,21 +86,11 @@ public class KTableImplTest {
         final MockProcessorSupplier<String, Object> supplier = new MockProcessorSupplier<>();
         table1.toStream().process(supplier);
 
-        final KTable<String, Integer> table2 = table1.mapValues(new ValueMapper<String, Integer>() {
-            @Override
-            public Integer apply(final String value) {
-                return new Integer(value);
-            }
-        });
+        final KTable<String, Integer> table2 = table1.mapValues(Integer::new);
 
         table2.toStream().process(supplier);
 
-        final KTable<String, Integer> table3 = table2.filter(new Predicate<String, Integer>() {
-            @Override
-            public boolean test(final String key, final Integer value) {
-                return (value % 2) == 0;
-            }
-        });
+        final KTable<String, Integer> table3 = table2.filter((key, value) -> (value % 2) == 0);
 
         table3.toStream().process(supplier);
 
@@ -134,20 +122,10 @@ public class KTableImplTest {
 
         final KTableImpl<String, String, String> table1 =
                 (KTableImpl<String, String, String>) builder.table(topic1, consumed);
-        final KTableImpl<String, String, Integer> table2 = (KTableImpl<String, String, Integer>) table1.mapValues(
-                new ValueMapper<String, Integer>() {
-                    @Override
-                    public Integer apply(final String value) {
-                        return new Integer(value);
-                    }
-                });
-        final KTableImpl<String, Integer, Integer> table3 = (KTableImpl<String, Integer, Integer>) table2.filter(
-                new Predicate<String, Integer>() {
-                    @Override
-                    public boolean test(final String key, final Integer value) {
-                        return (value % 2) == 0;
-                    }
-                });
+        final KTableImpl<String, String, Integer> table2 =
+            (KTableImpl<String, String, Integer>) table1.mapValues(Integer::new);
+        final KTableImpl<String, Integer, Integer> table3 =
+            (KTableImpl<String, Integer, Integer>) table2.filter((key, value) -> (value % 2) == 0);
 
         table1.toStream().to(topic2, produced);
         final KTableImpl<String, String, String> table4 = (KTableImpl<String, String, String>) builder.table(topic2, consumed);
@@ -179,81 +157,81 @@ public class KTableImplTest {
             getter3.init(driver.setCurrentNodeForProcessorContext(table3.name));
             getter4.init(driver.setCurrentNodeForProcessorContext(table4.name));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "01"));
-            driver.pipeInput(recordFactory.create(topic1, "B", "01"));
-            driver.pipeInput(recordFactory.create(topic1, "C", "01"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "01", 1L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "01", 2L));
+            driver.pipeInput(recordFactory.create(topic1, "C", "01", 3L));
 
-            assertEquals("01", getter1.get("A"));
-            assertEquals("01", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 1L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 2L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
-            assertEquals(new Integer(1), getter2.get("A"));
-            assertEquals(new Integer(1), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 1L), getter2.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 2L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
             assertNull(getter3.get("A"));
             assertNull(getter3.get("B"));
             assertNull(getter3.get("C"));
 
-            assertEquals("01", getter4.get("A"));
-            assertEquals("01", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 1L), getter4.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 2L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "02"));
-            driver.pipeInput(recordFactory.create(topic1, "B", "02"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "02", 10L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "02", 11L));
 
-            assertEquals("02", getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 10L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
-            assertEquals(new Integer(2), getter2.get("A"));
-            assertEquals(new Integer(2), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 10L), getter2.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
-            assertEquals(new Integer(2), getter3.get("A"));
-            assertEquals(new Integer(2), getter3.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 10L), getter3.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter3.get("B"));
             assertNull(getter3.get("C"));
 
-            assertEquals("02", getter4.get("A"));
-            assertEquals("02", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 10L), getter4.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "03"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "03", 5L));
 
-            assertEquals("03", getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("03", 5L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
-            assertEquals(new Integer(3), getter2.get("A"));
-            assertEquals(new Integer(2), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(3, 5L), getter2.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
             assertNull(getter3.get("A"));
-            assertEquals(new Integer(2), getter3.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter3.get("B"));
             assertNull(getter3.get("C"));
 
-            assertEquals("03", getter4.get("A"));
-            assertEquals("02", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("03", 5L), getter4.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
 
             driver.pipeInput(recordFactory.create(topic1, "A", (String) null));
 
             assertNull(getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
 
             assertNull(getter2.get("A"));
-            assertEquals(new Integer(2), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
             assertNull(getter3.get("A"));
-            assertEquals(new Integer(2), getter3.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter3.get("B"));
             assertNull(getter3.get("C"));
 
             assertNull(getter4.get("A"));
-            assertEquals("02", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
         }
     }
 
@@ -268,20 +246,9 @@ public class KTableImplTest {
                 (KTableImpl<String, String, String>) builder.table(topic1, consumed);
         builder.table(topic2, consumed);
 
-        final KTableImpl<String, String, Integer> table1Mapped = (KTableImpl<String, String, Integer>) table1.mapValues(
-                new ValueMapper<String, Integer>() {
-                    @Override
-                    public Integer apply(final String value) {
-                        return new Integer(value);
-                    }
-                });
-        table1Mapped.filter(
-                new Predicate<String, Integer>() {
-                    @Override
-                    public boolean test(final String key, final Integer value) {
-                        return (value % 2) == 0;
-                    }
-                });
+        final KTableImpl<String, String, Integer> table1Mapped =
+            (KTableImpl<String, String, Integer>) table1.mapValues(Integer::new);
+        table1Mapped.filter((key, value) -> (value % 2) == 0);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             assertEquals(2, driver.getAllStateStores().size());
@@ -300,27 +267,11 @@ public class KTableImplTest {
         final KTableImpl<String, String, String> table2 =
                 (KTableImpl<String, String, String>) builder.table(topic2, consumed);
 
-        final KTableImpl<String, String, Integer> table1Mapped = (KTableImpl<String, String, Integer>) table1.mapValues(
-                new ValueMapper<String, Integer>() {
-                    @Override
-                    public Integer apply(final String value) {
-                        return new Integer(value);
-                    }
-                });
-        final KTableImpl<String, Integer, Integer> table1MappedFiltered = (KTableImpl<String, Integer, Integer>) table1Mapped.filter(
-                new Predicate<String, Integer>() {
-                    @Override
-                    public boolean test(final String key, final Integer value) {
-                        return (value % 2) == 0;
-                    }
-                });
-        table2.join(table1MappedFiltered,
-                new ValueJoiner<String, Integer, String>() {
-                    @Override
-                    public String apply(final String v1, final Integer v2) {
-                        return v1 + v2;
-                    }
-                });
+        final KTableImpl<String, String, Integer> table1Mapped =
+            (KTableImpl<String, String, Integer>) table1.mapValues(Integer::new);
+        final KTableImpl<String, Integer, Integer> table1MappedFiltered =
+            (KTableImpl<String, Integer, Integer>) table1Mapped.filter((key, value) -> (value % 2) == 0);
+        table2.join(table1MappedFiltered, (v1, v2) -> v1 + v2);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             assertEquals(2, driver.getAllStateStores().size());
@@ -354,12 +305,12 @@ public class KTableImplTest {
                                                                            .withValueSerde(Serdes.String())
                 );
 
-        table1.groupBy(MockMapper.<String, String>noOpKeyValueMapper())
-            .aggregate(MockInitializer.STRING_INIT, MockAggregator.TOSTRING_ADDER, MockAggregator.TOSTRING_REMOVER, Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as("mock-result1"));
+        table1.groupBy(MockMapper.noOpKeyValueMapper())
+            .aggregate(MockInitializer.STRING_INIT, MockAggregator.TOSTRING_ADDER, MockAggregator.TOSTRING_REMOVER, Materialized.as("mock-result1"));
 
 
-        table1.groupBy(MockMapper.<String, String>noOpKeyValueMapper())
-            .reduce(MockReducer.STRING_ADDER, MockReducer.STRING_REMOVER, Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as("mock-result2"));
+        table1.groupBy(MockMapper.noOpKeyValueMapper())
+            .reduce(MockReducer.STRING_ADDER, MockReducer.STRING_REMOVER, Materialized.as("mock-result2"));
 
         final Topology topology = builder.build();
         try (final TopologyTestDriverWrapper driver = new TopologyTestDriverWrapper(topology, props)) {
@@ -450,37 +401,27 @@ public class KTableImplTest {
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerOnFilterWhenMaterializedIsNull() {
-        table.filter(new Predicate<String, String>() {
-            @Override
-            public boolean test(final String key, final String value) {
-                return false;
-            }
-        }, (Materialized) null);
+        table.filter((key, value) -> false, null);
     }
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerOnFilterNotWhenMaterializedIsNull() {
-        table.filterNot(new Predicate<String, String>() {
-            @Override
-            public boolean test(final String key, final String value) {
-                return false;
-            }
-        }, (Materialized) null);
+        table.filterNot((key, value) -> false, null);
     }
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerOnJoinWhenMaterializedIsNull() {
-        table.join(table, MockValueJoiner.TOSTRING_JOINER, (Materialized) null);
+        table.join(table, MockValueJoiner.TOSTRING_JOINER, null);
     }
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerOnLeftJoinWhenMaterializedIsNull() {
-        table.leftJoin(table, MockValueJoiner.TOSTRING_JOINER, (Materialized) null);
+        table.leftJoin(table, MockValueJoiner.TOSTRING_JOINER, null);
     }
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerOnOuterJoinWhenMaterializedIsNull() {
-        table.outerJoin(table, MockValueJoiner.TOSTRING_JOINER, (Materialized) null);
+        table.outerJoin(table, MockValueJoiner.TOSTRING_JOINER, null);
     }
 
     @Test(expected = NullPointerException.class)

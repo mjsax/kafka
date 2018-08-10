@@ -29,6 +29,7 @@ import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
@@ -109,33 +110,33 @@ public class KTableSourceTest {
             final KTableValueGetter<String, String> getter1 = getterSupplier1.get();
             getter1.init(driver.setCurrentNodeForProcessorContext(table1.name));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "01"));
-            driver.pipeInput(recordFactory.create(topic1, "B", "01"));
-            driver.pipeInput(recordFactory.create(topic1, "C", "01"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "01", 21L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "01", 42L));
+            driver.pipeInput(recordFactory.create(topic1, "C", "01", 63L));
 
-            assertEquals("01", getter1.get("A"));
-            assertEquals("01", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 21L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 42L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 63L), getter1.get("C"));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "02"));
-            driver.pipeInput(recordFactory.create(topic1, "B", "02"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "02", 42L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "02", 21L));
 
-            assertEquals("02", getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 42L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 21L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 63L), getter1.get("C"));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "03"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "03", 17L));
 
-            assertEquals("03", getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("03", 17L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 21L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 63L), getter1.get("C"));
 
             driver.pipeInput(recordFactory.create(topic1, "A", (String) null));
             driver.pipeInput(recordFactory.create(topic1, "B", (String) null));
 
             assertNull(getter1.get("A"));
             assertNull(getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 63L), getter1.get("C"));
         }
 
     }

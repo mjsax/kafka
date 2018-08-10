@@ -28,11 +28,11 @@ import org.apache.kafka.streams.TopologyWrapper;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.kstream.Predicate;
 import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.kstream.ValueMapper;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
@@ -70,12 +70,8 @@ public class KTableMapValuesTest {
         final String topic1 = "topic1";
 
         final KTable<String, String> table1 = builder.table(topic1, consumed);
-        final KTable<String, Integer> table2 = table1.mapValues(new ValueMapper<CharSequence, Integer>() {
-            @Override
-            public Integer apply(final CharSequence value) {
-                return value.charAt(0) - 48;
-            }
-        });
+        final KTable<String, Integer> table2 =
+            table1.mapValues((ValueMapper<CharSequence, Integer>) value -> value.charAt(0) - 48);
 
         final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
         table2.toStream().process(supplier);
@@ -90,12 +86,9 @@ public class KTableMapValuesTest {
         final String topic1 = "topic1";
 
         final KTable<String, String> table1 = builder.table(topic1, consumed);
-        final KTable<String, Integer> table2 = table1.mapValues(new ValueMapper<CharSequence, Integer>() {
-            @Override
-            public Integer apply(final CharSequence value) {
-                return value.charAt(0) - 48;
-            }
-        }, Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as("anyName").withValueSerde(Serdes.Integer()));
+        final KTable<String, Integer> table2 = table1.mapValues(
+            (ValueMapper<CharSequence, Integer>) value -> value.charAt(0) - 48,
+            Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as("anyName").withValueSerde(Serdes.Integer()));
 
         final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
         table2.toStream().process(supplier);
@@ -134,80 +127,80 @@ public class KTableMapValuesTest {
             getter3.init(driver.setCurrentNodeForProcessorContext(table3.name));
             getter4.init(driver.setCurrentNodeForProcessorContext(table4.name));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "01"));
-            driver.pipeInput(recordFactory.create(topic1, "B", "01"));
-            driver.pipeInput(recordFactory.create(topic1, "C", "01"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "01", 1L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "01", 2L));
+            driver.pipeInput(recordFactory.create(topic1, "C", "01", 3L));
 
-            assertEquals("01", getter1.get("A"));
-            assertEquals("01", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 1L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 2L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
-            assertEquals(new Integer(1), getter2.get("A"));
-            assertEquals(new Integer(1), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 1L), getter2.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 2L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
             assertNull(getter3.get("A"));
             assertNull(getter3.get("B"));
             assertNull(getter3.get("C"));
 
-            assertEquals("01", getter4.get("A"));
-            assertEquals("01", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 1L), getter4.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 2L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "02"));
-            driver.pipeInput(recordFactory.create(topic1, "B", "02"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "02", 10L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "02", 11L));
 
-            assertEquals("02", getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 10L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
-            assertEquals(new Integer(2), getter2.get("A"));
-            assertEquals(new Integer(2), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 10L), getter2.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
-            assertEquals(new Integer(2), getter3.get("A"));
-            assertEquals(new Integer(2), getter3.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 10L), getter3.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter3.get("B"));
             assertNull(getter3.get("C"));
 
-            assertEquals("02", getter4.get("A"));
-            assertEquals("02", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 10L), getter4.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
 
-            driver.pipeInput(recordFactory.create(topic1, "A", "03"));
+            driver.pipeInput(recordFactory.create(topic1, "A", "03", 7L));
 
-            assertEquals("03", getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("03", 7L), getter1.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
-            assertEquals(new Integer(3), getter2.get("A"));
-            assertEquals(new Integer(2), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(3, 7L), getter2.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
             assertNull(getter3.get("A"));
-            assertEquals(new Integer(2), getter3.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter3.get("B"));
             assertNull(getter3.get("C"));
 
-            assertEquals("03", getter4.get("A"));
-            assertEquals("02", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("03", 7L), getter4.get("A"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
 
             driver.pipeInput(recordFactory.create(topic1, "A", (String) null));
 
             assertNull(getter1.get("A"));
-            assertEquals("02", getter1.get("B"));
-            assertEquals("01", getter1.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter1.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter1.get("C"));
 
             assertNull(getter2.get("A"));
-            assertEquals(new Integer(2), getter2.get("B"));
-            assertEquals(new Integer(1), getter2.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter2.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(1, 3L), getter2.get("C"));
 
             assertNull(getter3.get("A"));
-            assertEquals(new Integer(2), getter3.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>(2, 11L), getter3.get("B"));
             assertNull(getter3.get("C"));
 
             assertNull(getter4.get("A"));
-            assertEquals("02", getter4.get("B"));
-            assertEquals("01", getter4.get("C"));
+            assertEquals(new ValueAndTimestampImpl<>("02", 11L), getter4.get("B"));
+            assertEquals(new ValueAndTimestampImpl<>("01", 3L), getter4.get("C"));
         }
     }
 
@@ -219,23 +212,14 @@ public class KTableMapValuesTest {
         final String topic2 = "topic2";
 
         final KTableImpl<String, String, String> table1 =
-                (KTableImpl<String, String, String>) builder.table(topic1, consumed);
-        final KTableImpl<String, String, Integer> table2 = (KTableImpl<String, String, Integer>) table1.mapValues(
-                new ValueMapper<String, Integer>() {
-                    @Override
-                    public Integer apply(final String value) {
-                        return new Integer(value);
-                    }
-                });
-        final KTableImpl<String, Integer, Integer> table3 = (KTableImpl<String, Integer, Integer>) table2.filter(
-                new Predicate<String, Integer>() {
-                    @Override
-                    public boolean test(final String key, final Integer value) {
-                        return (value % 2) == 0;
-                    }
-                });
+            (KTableImpl<String, String, String>) builder.table(topic1, consumed);
+        final KTableImpl<String, String, Integer> table2 =
+            (KTableImpl<String, String, Integer>) table1.mapValues(Integer::new);
+        final KTableImpl<String, Integer, Integer> table3 =
+            (KTableImpl<String, Integer, Integer>) table2.filter((key, value) -> (value % 2) == 0);
         table1.toStream().to(topic2, produced);
-        final KTableImpl<String, String, String> table4 = (KTableImpl<String, String, String>) builder.table(topic2, consumed);
+        final KTableImpl<String, String, String> table4 =
+            (KTableImpl<String, String, String>) builder.table(topic2, consumed);
 
         doTestValueGetter(builder, topic1, table1, table2, table3, table4);
     }
@@ -252,21 +236,16 @@ public class KTableMapValuesTest {
         final KTableImpl<String, String, String> table1 =
             (KTableImpl<String, String, String>) builder.table(topic1, consumed);
         final KTableImpl<String, String, Integer> table2 = (KTableImpl<String, String, Integer>) table1.mapValues(
-            new ValueMapper<String, Integer>() {
-                @Override
-                public Integer apply(final String value) {
-                    return new Integer(value);
-                }
-            }, Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as(storeName2).withValueSerde(Serdes.Integer()));
+            Integer::new,
+            Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as(storeName2)
+                .withValueSerde(Serdes.Integer()));
         final KTableImpl<String, Integer, Integer> table3 = (KTableImpl<String, Integer, Integer>) table2.filter(
-            new Predicate<String, Integer>() {
-                @Override
-                public boolean test(final String key, final Integer value) {
-                    return (value % 2) == 0;
-                }
-            }, Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as(storeName3).withValueSerde(Serdes.Integer()));
+            (key, value) -> (value % 2) == 0,
+            Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as(storeName3)
+                .withValueSerde(Serdes.Integer()));
         table1.toStream().to(topic2, produced);
-        final KTableImpl<String, String, String> table4 = (KTableImpl<String, String, String>) builder.table(topic2, consumed);
+        final KTableImpl<String, String, String> table4 =
+            (KTableImpl<String, String, String>) builder.table(topic2, consumed);
 
         doTestValueGetter(builder, topic1, table1, table2, table3, table4);
     }
@@ -279,13 +258,8 @@ public class KTableMapValuesTest {
 
         final KTableImpl<String, String, String> table1 =
                 (KTableImpl<String, String, String>) builder.table(topic1, consumed);
-        final KTableImpl<String, String, Integer> table2 = (KTableImpl<String, String, Integer>) table1.mapValues(
-                new ValueMapper<String, Integer>() {
-                    @Override
-                    public Integer apply(final String value) {
-                        return new Integer(value);
-                    }
-                });
+        final KTableImpl<String, String, Integer> table2 =
+            (KTableImpl<String, String, Integer>) table1.mapValues(Integer::new);
 
         final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
 
@@ -327,13 +301,8 @@ public class KTableMapValuesTest {
 
         final KTableImpl<String, String, String> table1 =
                 (KTableImpl<String, String, String>) builder.table(topic1, consumed);
-        final KTableImpl<String, String, Integer> table2 = (KTableImpl<String, String, Integer>) table1.mapValues(
-                new ValueMapper<String, Integer>() {
-                    @Override
-                    public Integer apply(final String value) {
-                        return new Integer(value);
-                    }
-                });
+        final KTableImpl<String, String, Integer> table2 =
+            (KTableImpl<String, String, Integer>) table1.mapValues(Integer::new);
 
         table2.enableSendingOldValues();
 

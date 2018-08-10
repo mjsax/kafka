@@ -29,6 +29,8 @@ import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.SessionStore;
+import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.ValueAndTimestampImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -122,11 +124,11 @@ class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProcessorSup
             if (!mergedWindow.equals(newSessionWindow)) {
                 for (final KeyValue<Windowed<K>, Agg> session : merged) {
                     store.remove(session.key);
-                    tupleForwarder.maybeForward(session.key, null, session.value);
+                    tupleForwarder.maybeForward(session.key, null, session.value, context().timestamp()); // TODO set proper result timestamp
                 }
             }
             store.put(sessionKey, agg);
-            tupleForwarder.maybeForward(sessionKey, agg, null);
+            tupleForwarder.maybeForward(sessionKey, agg, null, context().timestamp()); // TODO set proper result timestamp
         }
 
     }
@@ -163,7 +165,7 @@ class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProcessorSup
         }
 
         @Override
-        public Agg get(final Windowed<K> key) {
+        public ValueAndTimestamp<Agg> get(final Windowed<K> key) {
             try (final KeyValueIterator<Windowed<K>, Agg> iter = store.findSessions(key.key(), key.window().end(), key.window().end())) {
                 if (!iter.hasNext()) {
                     return null;
@@ -172,7 +174,8 @@ class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProcessorSup
                 if (iter.hasNext()) {
                     throw new ProcessorStateException(String.format("Iterator for key [%s] on session store has more than one value", key));
                 }
-                return value;
+                final long DUMMY = 0;
+                return value == null ? null : new ValueAndTimestampImpl<>(value, DUMMY); // TODO update if we have SessionWithTimestampStore
             }
         }
 
