@@ -854,11 +854,18 @@ public class StreamsConfig extends AbstractConfig {
     }
 
     private Map<String, Object> getCommonConsumerConfigs(final String consumerPrefix) {
-        final Map<String, Object> clientProvidedProps = getClientPropsWithPrefix(CONSUMER_PREFIX, ConsumerConfig.configNames());
+        // Get consumer override configs without prefix
+        final Map<String, Object> clientProvidedProps = clientProps(ConsumerConfig.configNames(), originals());
 
         // Get sub-prefix consumer override configs
-        final Map<String, Object> mainConsumerProps = originalsWithPrefix(consumerPrefix);
-        for (final Map.Entry<String, Object> entry: mainConsumerProps.entrySet()) {
+        final Map<String, Object> clientProvidedPropsWithSharedPrefix = originalsWithPrefix(CONSUMER_PREFIX);
+        for (final Map.Entry<String, Object> entry: clientProvidedPropsWithSharedPrefix.entrySet()) {
+            clientProvidedProps.put(entry.getKey(), entry.getValue());
+        }
+
+        // Get sub-sub-prefix consumer override configs
+        final Map<String, Object> clientProvidedPropsWithConsumerPrefix = originalsWithPrefix(consumerPrefix);
+        for (final Map.Entry<String, Object> entry: clientProvidedPropsWithConsumerPrefix.entrySet()) {
             clientProvidedProps.put(entry.getKey(), entry.getValue());
         }
 
@@ -870,6 +877,12 @@ public class StreamsConfig extends AbstractConfig {
         consumerProps.putAll(clientProvidedProps);
 
         // bootstrap.servers should be from StreamsConfig
+        if (clientProvidedPropsWithSharedPrefix.containsKey(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG)) {
+            log.info("Ignoring invalid consumer config {}.", StreamsConfig.consumerPrefix(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        }
+        if (clientProvidedPropsWithConsumerPrefix.containsKey(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG)) {
+            log.info("Ignoring invalid consumer config {}{}.", consumerPrefix, ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG);
+        }
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, originals().get(BOOTSTRAP_SERVERS_CONFIG));
 
         return consumerProps;
@@ -895,7 +908,7 @@ public class StreamsConfig extends AbstractConfig {
                         clientProvidedProps.remove(config);
                     }
                 } else if (eosEnabled) {
-                    final String eosMessage =  PROCESSING_GUARANTEE_CONFIG + " is set to " + EXACTLY_ONCE + ". Hence, ";
+                    final String eosMessage = PROCESSING_GUARANTEE_CONFIG + " is set to " + EXACTLY_ONCE + ". Hence, ";
 
                     if (CONSUMER_EOS_OVERRIDES.containsKey(config)) {
                         if (!clientProvidedProps.get(config).equals(CONSUMER_EOS_OVERRIDES.get(config))) {
@@ -958,7 +971,10 @@ public class StreamsConfig extends AbstractConfig {
         consumerProps.put(CommonClientConfigs.CLIENT_ID_CONFIG, clientId + "-consumer");
 
         // add configs required for stream partition assignor
-        consumerProps.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, StreamsPartitionAssignor.class.getName());
+        if (consumerProps.containsKey(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG)) {
+            log.info("Ignoring invalid consumer config {}.", ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG);
+        }
+        consumerProps.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, StreamsPartitionAssignor.class);
         consumerProps.put(APPLICATION_ID_CONFIG, groupId);
         consumerProps.put(APPLICATION_SERVER_CONFIG, getString(APPLICATION_SERVER_CONFIG));
         consumerProps.put(NUM_STANDBY_REPLICAS_CONFIG, getInt(NUM_STANDBY_REPLICAS_CONFIG));
@@ -970,9 +986,9 @@ public class StreamsConfig extends AbstractConfig {
         final AdminClientConfig adminClientDefaultConfig = new AdminClientConfig(getClientPropsWithPrefix(ADMIN_CLIENT_PREFIX, AdminClientConfig.configNames()));
         consumerProps.put(adminClientPrefix(AdminClientConfig.RETRIES_CONFIG), adminClientDefaultConfig.getInt(AdminClientConfig.RETRIES_CONFIG));
 
-        // verify that producer batch config is no larger than segment size, then add topic configs required for creating topics
         final Map<String, Object> topicProps = originalsWithPrefix(TOPIC_PREFIX, false);
 
+        // verify that producer batch config is no larger than segment size, then add topic configs required for creating topics
         if (topicProps.containsKey(topicPrefix(TopicConfig.SEGMENT_INDEX_BYTES_CONFIG))) {
             final int segmentSize = Integer.parseInt(topicProps.get(topicPrefix(TopicConfig.SEGMENT_INDEX_BYTES_CONFIG)).toString());
             final Map<String, Object> producerProps = getClientPropsWithPrefix(PRODUCER_PREFIX, ProducerConfig.configNames());

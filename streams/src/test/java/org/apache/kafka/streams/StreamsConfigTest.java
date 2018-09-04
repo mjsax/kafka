@@ -22,7 +22,6 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
@@ -46,9 +45,15 @@ import java.util.Properties;
 
 import static org.apache.kafka.common.requests.IsolationLevel.READ_COMMITTED;
 import static org.apache.kafka.common.requests.IsolationLevel.READ_UNCOMMITTED;
+import static org.apache.kafka.streams.StreamsConfig.APPLICATION_ID_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.APPLICATION_SERVER_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.CONSUMER_DEFAULT_OVERRIDES;
 import static org.apache.kafka.streams.StreamsConfig.EXACTLY_ONCE;
+import static org.apache.kafka.streams.StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.REPLICATION_FACTOR_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.TOPOLOGY_OPTIMIZATION;
+import static org.apache.kafka.streams.StreamsConfig.UPGRADE_FROM_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.WINDOW_STORE_CHANGE_LOG_ADDITIONAL_RETENTION_MS_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.adminClientPrefix;
 import static org.apache.kafka.streams.StreamsConfig.consumerPrefix;
 import static org.apache.kafka.streams.StreamsConfig.mainConsumerPrefix;
@@ -69,7 +74,7 @@ public class StreamsConfigTest {
 
     @Before
     public void setUp() {
-        props.put(StreamsConfig.APPLICATION_ID_CONFIG, "streams-config-test");
+        props.put(APPLICATION_ID_CONFIG, "streams-config-test");
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
         props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
@@ -80,7 +85,7 @@ public class StreamsConfigTest {
 
     @Test(expected = ConfigException.class)
     public void shouldThrowExceptionIfApplicationIdIsNotSet() {
-        props.remove(StreamsConfig.APPLICATION_ID_CONFIG);
+        props.remove(APPLICATION_ID_CONFIG);
         new StreamsConfig(props);
     }
 
@@ -91,61 +96,199 @@ public class StreamsConfigTest {
     }
 
     @Test
-    public void shouldGetMainConsumerConfigsWithDefaultOverwrites() {
-        final String groupId = "example-application";
-        final String clientId = "client";
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 42);
-        final StreamsConfig streamsConfig = new StreamsConfig(props);
-        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
-
-        assertEquals(returnedProps.get(ConsumerConfig.CLIENT_ID_CONFIG), clientId + "-consumer");
-        assertEquals(returnedProps.get(ConsumerConfig.GROUP_ID_CONFIG), groupId);
-        for (final Map.Entry<String, Object> defaultOverwrite : CONSUMER_DEFAULT_OVERRIDES.entrySet()) {
-            assertEquals(returnedProps.get(defaultOverwrite.getKey()), defaultOverwrite.getValue());
-        }
-
+    public void shouldIgnoreConsumerPrefixedBootstrapServerForMainConsumer() {
         final LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister();
-        assertTrue(logCaptureAppender.getMessages().contains("test Error sending records (key=[3] value=[0] timestamp=[null]) to topic=[topic1] and partition=[0]; The exception handler chose to CONTINUE processing in spite of this error."));
+
+        props.put(StreamsConfig.consumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG), "invalidServerConfig:1234");
+        props.put(StreamsConfig.mainConsumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG), "invalidServerConfig:1234");
+
+        new StreamsConfig(props);
+        final Map<String, Object> mainProps = streamsConfig.getMainConsumerConfigs("groupId", "clientId");
+
+        assertEquals("localhost:9092", mainProps.get(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG));
+
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.consumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) + "."));
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.mainConsumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) + "."));
         LogCaptureAppender.unregister(logCaptureAppender);
     }
 
     @Test
-    public void testGetProducerConfigs() {
-        final String clientId = "client";
-        final Map<String, Object> returnedProps = streamsConfig.getProducerConfigs(clientId);
-        assertEquals(returnedProps.get(ProducerConfig.CLIENT_ID_CONFIG), clientId + "-producer");
-        assertEquals(returnedProps.get(ProducerConfig.LINGER_MS_CONFIG), "100");
+    public void shouldIgnoreConsumerPrefixedBootstrapServerForRestoreConsumer() {
+        final LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister();
+
+        props.put(StreamsConfig.consumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG), "invalidServerConfig:1234");
+        props.put(StreamsConfig.restoreConsumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG), "invalidServerConfig:1234");
+
+        new StreamsConfig(props);
+        final Map<String, Object> restoreProps = streamsConfig.getRestoreConsumerConfigs("clientId");
+
+        assertEquals("localhost:9092", restoreProps.get(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG));
+
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.consumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) + "."));
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.restoreConsumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) + "."));
+        LogCaptureAppender.unregister(logCaptureAppender);
     }
 
     @Test
-    public void consumerConfigMustContainStreamPartitionAssignorConfig() {
-        props.put(StreamsConfig.REPLICATION_FACTOR_CONFIG, 42);
-        props.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 1);
-        props.put(StreamsConfig.WINDOW_STORE_CHANGE_LOG_ADDITIONAL_RETENTION_MS_CONFIG, 7L);
-        props.put(StreamsConfig.APPLICATION_SERVER_CONFIG, "dummy:host");
-        props.put(StreamsConfig.RETRIES_CONFIG, 10);
-        props.put(StreamsConfig.adminClientPrefix(StreamsConfig.RETRIES_CONFIG), 5);
-        props.put(StreamsConfig.topicPrefix(TopicConfig.SEGMENT_BYTES_CONFIG), 100);
+    public void shouldIgnoreConsumerPrefixedBootstrapServerForGlobalConsumer() {
+        final LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister();
+
+        props.put(StreamsConfig.consumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG), "invalidServerConfig:1234");
+        props.put(StreamsConfig.globalConsumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG), "invalidServerConfig:1234");
+
+        new StreamsConfig(props);
+        final Map<String, Object> globalProps = streamsConfig.getGlobalConsumerConfigs("clientId");
+
+        assertEquals("localhost:9092", globalProps.get(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG));
+
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.consumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) + "."));
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.globalConsumerPrefix(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) + "."));
+        LogCaptureAppender.unregister(logCaptureAppender);
+    }
+
+    @Test
+    public void shouldIgnoreGroupIdConfigForMainConsumer() {
+        final LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister();
+
+        props.put(StreamsConfig.consumerPrefix(ConsumerConfig.GROUP_ID_CONFIG), "ignoredGroupId");
+        props.put(StreamsConfig.mainConsumerPrefix(ConsumerConfig.GROUP_ID_CONFIG), "ignoredGroupId");
+
+        new StreamsConfig(props);
+        final Map<String, Object> mainProps = streamsConfig.getMainConsumerConfigs("groupId", "clientId");
+
+        assertEquals("localhost:9092", mainProps.get(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG));
+
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.consumerPrefix(ConsumerConfig.GROUP_ID_CONFIG) + "."));
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + StreamsConfig.mainConsumerPrefix(ConsumerConfig.GROUP_ID_CONFIG) + "."));
+        LogCaptureAppender.unregister(logCaptureAppender);
+    }
+
+    @Test
+    public void shouldGetMainConsumerConfigsWithDefaultOverwrites() {
+        final String groupId = "example-application";
+        final String clientId = "client";
+
+        final StreamsConfig streamsConfig = new StreamsConfig(props);
+        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
+
+        assertEquals(clientId + "-consumer", returnedProps.get(ConsumerConfig.CLIENT_ID_CONFIG));
+        assertEquals(groupId, returnedProps.get(ConsumerConfig.GROUP_ID_CONFIG));
+        for (final Map.Entry<String, Object> defaultOverwrite : CONSUMER_DEFAULT_OVERRIDES.entrySet()) {
+            assertEquals(defaultOverwrite.getValue(), returnedProps.get(defaultOverwrite.getKey()));
+        }
+    }
+
+    @Test
+    public void shouldGetRestoreConsumerConfigs() {
+        final String clientId = "client";
+        final Map<String, Object> returnedProps = streamsConfig.getRestoreConsumerConfigs(clientId);
+        assertEquals(clientId + "-restore-consumer", returnedProps.get(ConsumerConfig.CLIENT_ID_CONFIG));
+        assertNull(returnedProps.get(ConsumerConfig.GROUP_ID_CONFIG));
+        assertEquals("none", returnedProps.get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG));
+    }
+
+    @Test
+    public void shouldGetGlobalConsumerConfigs() {
+        final String clientId = "client";
+        final Map<String, Object> returnedProps = streamsConfig.getGlobalConsumerConfigs(clientId);
+        assertEquals(returnedProps.get(ConsumerConfig.CLIENT_ID_CONFIG), clientId + "-global-consumer");
+        assertNull(returnedProps.get(ConsumerConfig.GROUP_ID_CONFIG));
+        assertEquals("none", returnedProps.get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG));
+    }
+
+    @Test
+    public void shouldAddStreamPartitionAssignorConfigsToMainConsumerConfigs() {
+        final String groupId = "example-application";
+        final String clientId = "client";
+
+        final StreamsConfig streamsConfig = new StreamsConfig(props);
+        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
+
+        assertEquals(StreamsPartitionAssignor.class, returnedProps.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG));
+        assertTrue(returnedProps.containsKey(APPLICATION_ID_CONFIG));
+        assertTrue(returnedProps.containsKey(APPLICATION_SERVER_CONFIG));
+        assertTrue(returnedProps.containsKey(NUM_STANDBY_REPLICAS_CONFIG));
+        assertTrue(returnedProps.containsKey(REPLICATION_FACTOR_CONFIG));
+        assertTrue(returnedProps.containsKey(UPGRADE_FROM_CONFIG));
+        assertTrue(returnedProps.containsKey(WINDOW_STORE_CHANGE_LOG_ADDITIONAL_RETENTION_MS_CONFIG));
+    }
+
+    @Test
+    public void shouldIgnoreCustomStreamPartitionAssignorConfig() {
+        final LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister();
+
+        props.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, "DummyAssigner.class");
         final StreamsConfig streamsConfig = new StreamsConfig(props);
 
         final String groupId = "example-application";
         final String clientId = "client";
         final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
 
-        assertEquals(42, returnedProps.get(StreamsConfig.REPLICATION_FACTOR_CONFIG));
-        assertEquals(1, returnedProps.get(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG));
-        assertEquals(StreamsPartitionAssignor.class.getName(), returnedProps.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG));
-        assertEquals(7L, returnedProps.get(StreamsConfig.WINDOW_STORE_CHANGE_LOG_ADDITIONAL_RETENTION_MS_CONFIG));
-        assertEquals("dummy:host", returnedProps.get(StreamsConfig.APPLICATION_SERVER_CONFIG));
-        assertEquals(null, returnedProps.get(StreamsConfig.RETRIES_CONFIG));
-        assertEquals(5, returnedProps.get(StreamsConfig.adminClientPrefix(StreamsConfig.RETRIES_CONFIG)));
-        assertEquals(100, returnedProps.get(StreamsConfig.topicPrefix(TopicConfig.SEGMENT_BYTES_CONFIG)));
+        assertEquals(StreamsPartitionAssignor.class, returnedProps.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG));
+        assertTrue(logCaptureAppender.getMessages().contains("Ignoring invalid consumer config " + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG + "."));
+        LogCaptureAppender.unregister(logCaptureAppender);
     }
 
     @Test
-    public void consumerConfigMustUseAdminClientConfigForRetries() {
+    public void shouldForwardCustomConfigsToStreamPartitionAssignorConfig() {
+        props.put(APPLICATION_SERVER_CONFIG, "dummy:host");
+        props.put(NUM_STANDBY_REPLICAS_CONFIG, 1);
+        props.put(REPLICATION_FACTOR_CONFIG, 42);
+        props.put(UPGRADE_FROM_CONFIG, StreamsConfig.UPGRADE_FROM_10);
+        props.put(WINDOW_STORE_CHANGE_LOG_ADDITIONAL_RETENTION_MS_CONFIG, 7L);
+        final StreamsConfig streamsConfig = new StreamsConfig(props);
+
+        final String groupId = "example-application";
+        final String clientId = "client";
+        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
+
+        assertEquals("dummy:host", returnedProps.get(APPLICATION_SERVER_CONFIG));
+        assertEquals(1, returnedProps.get(NUM_STANDBY_REPLICAS_CONFIG));
+        assertEquals(42, returnedProps.get(REPLICATION_FACTOR_CONFIG));
+        assertEquals(StreamsConfig.UPGRADE_FROM_10, returnedProps.get(UPGRADE_FROM_CONFIG));
+        assertEquals(7L, returnedProps.get(WINDOW_STORE_CHANGE_LOG_ADDITIONAL_RETENTION_MS_CONFIG));
+    }
+
+    @Test
+    public void shouldAddAdminClientConfigsToMainConsumerConfigs() {
+        final String groupId = "example-application";
+        final String clientId = "client";
+
+        final StreamsConfig streamsConfig = new StreamsConfig(props);
+        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
+        assertTrue(returnedProps.containsKey(StreamsConfig.adminClientPrefix(CommonClientConfigs.RETRIES_CONFIG)));
+    }
+
+    @Test
+    public void shouldForwardCustomRetriesWithoutPrefixConfigsForAdminClientConfig() {
+        props.put(StreamsConfig.RETRIES_CONFIG, 5);
+        final StreamsConfig streamsConfig = new StreamsConfig(props);
+
+        final String groupId = "example-application";
+        final String clientId = "client";
+        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
+
+        assertEquals(5, returnedProps.get(StreamsConfig.adminClientPrefix(StreamsConfig.RETRIES_CONFIG)));
+    }
+
+    @Test
+    public void shouldForwardCustomRetriesWithPrefixConfigsForAdminClientConfig() {
+        props.put(StreamsConfig.adminClientPrefix(StreamsConfig.RETRIES_CONFIG), 10);
+        final StreamsConfig streamsConfig = new StreamsConfig(props);
+
+        final String groupId = "example-application";
+        final String clientId = "client";
+        final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
+
+        assertEquals(10, returnedProps.get(StreamsConfig.adminClientPrefix(StreamsConfig.RETRIES_CONFIG)));
+    }
+
+    @Test
+    public void shouldForwardCustomRetriesWithPrefixOverwritesWithoutPrefixConfigsForAdminClientConfig() {
+//        props.put(StreamsConfig.topicPrefix(TopicConfig.SEGMENT_BYTES_CONFIG), 100);
+
+        props.put(StreamsConfig.RETRIES_CONFIG, 5);
         props.put(StreamsConfig.adminClientPrefix(StreamsConfig.RETRIES_CONFIG), 20);
-        props.put(StreamsConfig.RETRIES_CONFIG, 10);
         final StreamsConfig streamsConfig = new StreamsConfig(props);
 
         final String groupId = "example-application";
@@ -156,6 +299,14 @@ public class StreamsConfigTest {
     }
 
     @Test
+    public void testGetProducerConfigs() {
+        final String clientId = "client";
+        final Map<String, Object> returnedProps = streamsConfig.getProducerConfigs(clientId);
+        assertEquals(clientId + "-producer", returnedProps.get(ProducerConfig.CLIENT_ID_CONFIG));
+        assertEquals("100", returnedProps.get(ProducerConfig.LINGER_MS_CONFIG));
+    }
+
+    @Test
     public void shouldGetMainConsumerConfigsWithMainConsumerOverriddenPrefix() {
         props.put(StreamsConfig.consumerPrefix(ConsumerConfig.MAX_POLL_RECORDS_CONFIG), "5");
         props.put(StreamsConfig.mainConsumerPrefix(ConsumerConfig.MAX_POLL_RECORDS_CONFIG), "50");
@@ -163,14 +314,6 @@ public class StreamsConfigTest {
         final String clientId = "client";
         final Map<String, Object> returnedProps = streamsConfig.getMainConsumerConfigs(groupId, clientId);
         assertEquals("50", returnedProps.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG));
-    }
-
-    @Test
-    public void shouldGetRestoreConsumerConfigs() {
-        final String clientId = "client";
-        final Map<String, Object> returnedProps = streamsConfig.getRestoreConsumerConfigs(clientId);
-        assertEquals(returnedProps.get(ConsumerConfig.CLIENT_ID_CONFIG), clientId + "-restore-consumer");
-        assertNull(returnedProps.get(ConsumerConfig.GROUP_ID_CONFIG));
     }
 
     @Test
@@ -197,7 +340,7 @@ public class StreamsConfigTest {
         final List<String> expectedBootstrapServers = Arrays.asList("broker1:9092", "broker2:9092");
         final String bootstrapServersString = Utils.join(expectedBootstrapServers, ",");
         final Properties props = new Properties();
-        props.put(StreamsConfig.APPLICATION_ID_CONFIG, "irrelevant");
+        props.put(APPLICATION_ID_CONFIG, "irrelevant");
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServersString);
         final StreamsConfig config = new StreamsConfig(props);
 
@@ -450,14 +593,6 @@ public class StreamsConfigTest {
     }
 
     @Test
-    public void testGetGlobalConsumerConfigs() {
-        final String clientId = "client";
-        final Map<String, Object> returnedProps = streamsConfig.getGlobalConsumerConfigs(clientId);
-        assertEquals(returnedProps.get(ConsumerConfig.CLIENT_ID_CONFIG), clientId + "-global-consumer");
-        assertNull(returnedProps.get(ConsumerConfig.GROUP_ID_CONFIG));
-    }
-
-    @Test
     public void shouldSupportPrefixedGlobalConsumerConfigs() {
         props.put(consumerPrefix(ConsumerConfig.METRICS_NUM_SAMPLES_CONFIG), 1);
         final StreamsConfig streamsConfig = new StreamsConfig(props);
@@ -501,7 +636,7 @@ public class StreamsConfigTest {
     public void shouldSetInternalLeaveGroupOnCloseConfigToFalseInConsumer() {
         final StreamsConfig streamsConfig = new StreamsConfig(props);
         final Map<String, Object> consumerConfigs = streamsConfig.getMainConsumerConfigs("groupId", "clientId");
-        assertThat(consumerConfigs.get("internal.leave.group.on.close"), CoreMatchers.<Object>equalTo(false));
+        assertThat(consumerConfigs.get("internal.leave.group.on.close"), CoreMatchers.equalTo(false));
     }
 
     @Test
