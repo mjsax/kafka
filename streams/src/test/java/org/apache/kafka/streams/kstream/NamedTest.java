@@ -16,9 +16,11 @@
  */
 package org.apache.kafka.streams.kstream;
 
+import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.errors.TopologyException;
 import org.junit.Test;
 
+import java.time.Duration;
 import java.util.Arrays;
 
 import static org.junit.Assert.fail;
@@ -45,4 +47,505 @@ public class NamedTest {
             }
         }
     }
+
+    @Test
+    public void test() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupByKey().count();
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupByKey(Grouped.as("grpBy")).count();
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupByKey().count(Named.as("cnt"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupByKey().count(Materialized.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupByKey(Grouped.as("grp")).count(Named.as("cnt"), Materialized.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test2() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupBy((k, v) -> k).count();
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupBy((k, v) -> k, Grouped.as("grpBy")).count();
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupBy((k, v) -> k).count(Named.as("cnt"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupBy((k, v) -> k).count(Materialized.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            builder.stream("topic").groupBy((k, v) -> k, Grouped.as("grp")).count(Named.as("cnt"), Materialized.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test3() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as(null).withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as("store").withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test4() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as(null).withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.stream("topic2");
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as("store").withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test5() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as(null).withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.stream("topic1");
+            final KStream<String, String> s2 = builder.<String, :wqString>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as("store").withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test6() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.as("store"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as(null).withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s1 = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KStream<String, String> s2 = builder.<String, String>stream("topic2").selectKey((k, v) -> k);
+
+            s1.join(s2, (v1, v2) -> v1 + v2, JoinWindows.of(Duration.ZERO), StreamJoined.<String, String, String>as("store").withName("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test7() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2");
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"));
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2", Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2");
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"), Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"));
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2", Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.stream("topic1");
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"), Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+    @Test
+    public void test8() {
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k, Named.as("key"));
+            final KTable<String, String> t = builder.table("topic2");
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"));
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2", Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2");
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"), Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2);
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"));
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2", Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+
+        {
+            final StreamsBuilder builder = new StreamsBuilder();
+            final KStream<String, String> s = builder.<String, String>stream("topic1").selectKey((k, v) -> k);
+            final KTable<String, String> t = builder.table("topic2", Consumed.as("table"), Materialized.as("store"));
+
+            s.join(t, (v1, v2) -> v1 + v2, Joined.as("join"));
+
+            System.out.println(builder.build().describe().toString());
+        }
+        System.out.println();
+        System.out.println();
+    }
+
+
 }
