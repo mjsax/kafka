@@ -217,7 +217,7 @@ public class StreamTaskTest {
 
     @After
     public void cleanup() throws IOException {
-        if (task != null && !task.isClosed()) {
+        if (task != null) {
             task.prepareCloseDirty();
             task.closeDirty();
             task = null;

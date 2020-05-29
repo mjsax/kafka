@@ -19,10 +19,10 @@ package org.apache.kafka.streams.processor.internals;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.TaskId;
+import org.slf4j.Logger;
 
 import java.util.Collection;
 import java.util.Set;
-import org.slf4j.Logger;
 
 import static org.apache.kafka.streams.processor.internals.Task.State.CLOSED;
 import static org.apache.kafka.streams.processor.internals.Task.State.CREATED;
@@ -71,11 +71,6 @@ public abstract class AbstractTask implements Task {
     @Override
     public StateStore getStore(final String name) {
         return stateMgr.getStore(name);
-    }
-
-    @Override
-    public boolean isClosed() {
-        return state() == State.CLOSED;
     }
 
     @Override

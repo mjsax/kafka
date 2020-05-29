@@ -50,16 +50,12 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.kafka.streams.processor.internals.StreamThread.ProcessingMode.EXACTLY_ONCE_ALPHA;
 import static org.apache.kafka.streams.processor.internals.StreamThread.ProcessingMode.EXACTLY_ONCE_BETA;
-import static org.apache.kafka.streams.processor.internals.Task.State.CREATED;
-import static org.apache.kafka.streams.processor.internals.Task.State.RESTORING;
 import static org.apache.kafka.streams.processor.internals.Task.State.RUNNING;
 
 public class TaskManager {
@@ -70,17 +66,11 @@ public class TaskManager {
     private final ChangelogReader changelogReader;
     private final UUID processId;
     private final String logPrefix;
-    private final StreamsMetricsImpl streamsMetrics;
-    private final ActiveTaskCreator activeTaskCreator;
-    private final StandbyTaskCreator standbyTaskCreator;
     private final InternalTopologyBuilder builder;
     private final Admin adminClient;
     private final StateDirectory stateDirectory;
     private final StreamThread.ProcessingMode processingMode;
-
-    private final Map<TaskId, Task> tasks = new TreeMap<>();
-    // materializing this relationship because the lookup is on the hot path
-    private final Map<TopicPartition, Task> partitionToTask = new HashMap<>();
+    private final Tasks tasks;
 
     private Consumer<byte[], byte[]> mainConsumer;
 
@@ -89,7 +79,7 @@ public class TaskManager {
     private boolean rebalanceInProgress = false;  // if we are in the middle of a rebalance, it is not safe to commit
 
     // includes assigned & initialized tasks and unassigned tasks we locked temporarily during rebalance
-    private Set<TaskId> lockedTaskDirectories = new HashSet<>();
+    private final Set<TaskId> lockedTaskDirectories = new HashSet<>();
 
     TaskManager(final ChangelogReader changelogReader,
                 final UUID processId,
@@ -104,9 +94,7 @@ public class TaskManager {
         this.changelogReader = changelogReader;
         this.processId = processId;
         this.logPrefix = logPrefix;
-        this.streamsMetrics = streamsMetrics;
-        this.activeTaskCreator = activeTaskCreator;
-        this.standbyTaskCreator = standbyTaskCreator;
+        this.tasks = new Tasks(logPrefix, builder, streamsMetrics, activeTaskCreator, standbyTaskCreator);
         this.builder = builder;
         this.adminClient = adminClient;
         this.stateDirectory = stateDirectory;
@@ -118,6 +106,7 @@ public class TaskManager {
 
     void setMainConsumer(final Consumer<byte[], byte[]> mainConsumer) {
         this.mainConsumer = mainConsumer;
+        tasks.setMainConsumer(mainConsumer);
     }
 
     public UUID processId() {
@@ -150,10 +139,10 @@ public class TaskManager {
         rebalanceInProgress = false;
     }
 
-    void handleCorruption(final Map<TaskId, Collection<TopicPartition>> taskWithChangelogs) {
-        for (final Map.Entry<TaskId, Collection<TopicPartition>> entry : taskWithChangelogs.entrySet()) {
+    void handleCorruption(final Map<TaskId, Collection<TopicPartition>> standbyTasksWithChangelogs) {
+        for (final Map.Entry<TaskId, Collection<TopicPartition>> entry : standbyTasksWithChangelogs.entrySet()) {
             final TaskId taskId = entry.getKey();
-            final Task task = tasks.get(taskId);
+            final Task task = tasks.task(taskId);
 
             // mark corrupted partitions to not be checkpointed, and then close the task as dirty
             final Collection<TopicPartition> corruptedPartitions = entry.getValue();
@@ -178,7 +167,7 @@ public class TaskManager {
                      "\tNew standby tasks: {}\n" +
                      "\tExisting active tasks: {}\n" +
                      "\tExisting standby tasks: {}",
-                 activeTasks.keySet(), standbyTasks.keySet(), activeTaskIds(), standbyTaskIds());
+                 activeTasks.keySet(), standbyTasks.keySet(), tasks.activeTaskIds(), tasks.standbyTaskIds());
 
         final Map<TaskId, Set<TopicPartition>> activeTasksToCreate = new HashMap<>(activeTasks);
         final Map<TaskId, Set<TopicPartition>> standbyTasksToCreate = new HashMap<>(standbyTasks);
@@ -197,15 +186,15 @@ public class TaskManager {
         final Set<Task> additionalTasksForCommitting = new HashSet<>();
         final Set<Task> dirtyTasks = new HashSet<>();
 
-        for (final Task task : tasks.values()) {
+        for (final Task task : tasks.allTasks()) {
             if (activeTasks.containsKey(task.id()) && task.isActive()) {
-                updateInputPartitionsAndResume(task, activeTasks.get(task.id()));
+                tasks.updateInputPartitionsAndResume(task, activeTasks.get(task.id()));
                 if (task.commitNeeded()) {
                     additionalTasksForCommitting.add(task);
                 }
                 activeTasksToCreate.remove(task.id());
             } else if (standbyTasks.containsKey(task.id()) && !task.isActive()) {
-                updateInputPartitionsAndResume(task, standbyTasks.get(task.id()));
+                tasks.updateInputPartitionsAndResume(task, standbyTasks.get(task.id()));
                 standbyTasksToCreate.remove(task.id());
                 // check for tasks that were owned previously but have changed active/standby status
             } else if (activeTasks.containsKey(task.id()) || standbyTasks.containsKey(task.id())) {
@@ -266,8 +255,7 @@ public class TaskManager {
 
             try {
                 completeTaskCloseClean(task, checkpoint);
-                cleanUpTaskProducer(task, taskCloseExceptions);
-                tasks.remove(task.id());
+                tasks.cleanUpTaskProducerAndRemoveTask(task.id(), taskCloseExceptions);
             } catch (final RuntimeException e) {
                 final String uncleanMessage = String.format("Failed to close task %s cleanly. Attempting to close remaining tasks before re-throwing:", task.id());
                 log.error(uncleanMessage, e);
@@ -279,17 +267,14 @@ public class TaskManager {
         }
 
         for (final Task oldTask : tasksToRecycle) {
-            final Task newTask;
             try {
                 if (oldTask.isActive()) {
                     final Set<TopicPartition> partitions = standbyTasksToCreate.remove(oldTask.id());
-                    newTask = standbyTaskCreator.createStandbyTaskFromActive((StreamTask) oldTask, partitions);
+                    tasks.convertActiveToStandby((StreamTask) oldTask, partitions);
                 } else {
                     final Set<TopicPartition> partitions = activeTasksToCreate.remove(oldTask.id());
-                    newTask = activeTaskCreator.createActiveTaskFromStandby((StandbyTask) oldTask, partitions, mainConsumer);
+                    tasks.convertStandbyToActive((StandbyTask) oldTask, partitions);
                 }
-                tasks.remove(oldTask.id());
-                addNewTask(newTask);
             } catch (final RuntimeException e) {
                 final String uncleanMessage = String.format("Failed to recycle task %s cleanly. Attempting to close remaining tasks before re-throwing:", oldTask.id());
                 log.error(uncleanMessage, e);
@@ -300,8 +285,7 @@ public class TaskManager {
 
         for (final Task task : dirtyTasks) {
             closeTaskDirty(task);
-            cleanUpTaskProducer(task, taskCloseExceptions);
-            tasks.remove(task.id());
+            tasks.cleanUpTaskProducerAndRemoveTask(task.id(), taskCloseExceptions);
         }
 
         if (!taskCloseExceptions.isEmpty()) {
@@ -325,57 +309,7 @@ public class TaskManager {
             throw first.getValue();
         }
 
-        if (!activeTasksToCreate.isEmpty()) {
-            for (final Task task : activeTaskCreator.createTasks(mainConsumer, activeTasksToCreate)) {
-                addNewTask(task);
-            }
-        }
-
-        if (!standbyTasksToCreate.isEmpty()) {
-            for (final Task task : standbyTaskCreator.createTasks(standbyTasksToCreate)) {
-                addNewTask(task);
-            }
-        }
-
-    }
-
-    private void cleanUpTaskProducer(final Task task,
-                                     final Map<TaskId, RuntimeException> taskCloseExceptions) {
-        if (task.isActive()) {
-            try {
-                activeTaskCreator.closeAndRemoveTaskProducerIfNeeded(task.id());
-            } catch (final RuntimeException e) {
-                final String uncleanMessage = String.format("Failed to close task %s cleanly. Attempting to close remaining tasks before re-throwing:", task.id());
-                log.error(uncleanMessage, e);
-                taskCloseExceptions.putIfAbsent(task.id(), e);
-            }
-        }
-    }
-
-    private void updateInputPartitionsAndResume(final Task task, final Set<TopicPartition> topicPartitions) {
-        final boolean requiresUpdate = !task.inputPartitions().equals(topicPartitions);
-        if (requiresUpdate) {
-            log.trace("Update task {} inputPartitions: current {}, new {}", task, task.inputPartitions(), topicPartitions);
-            for (final TopicPartition inputPartition : task.inputPartitions()) {
-                partitionToTask.remove(inputPartition);
-            }
-            for (final TopicPartition topicPartition : topicPartitions) {
-                partitionToTask.put(topicPartition, task);
-            }
-            task.update(topicPartitions, builder.buildSubtopology(task.id().topicGroupId));
-        }
-        task.resume();
-    }
-
-    private void addNewTask(final Task task) {
-        final Task previous = tasks.put(task.id(), task);
-        if (previous != null) {
-            throw new IllegalStateException("Attempted to create a task that we already owned: " + task.id());
-        }
-
-        for (final TopicPartition topicPartition : task.inputPartitions()) {
-            partitionToTask.put(topicPartition, task);
-        }
+        tasks.createTasks(activeTasksToCreate, standbyTasksToCreate);
     }
 
     /**
@@ -388,22 +322,20 @@ public class TaskManager {
     boolean tryToCompleteRestoration() {
         boolean allRunning = true;
 
-        final List<Task> restoringTasks = new LinkedList<>();
-        for (final Task task : tasks.values()) {
-            if (task.state() == CREATED) {
-                try {
-                    task.initializeIfNeeded();
-                } catch (final LockException | TimeoutException e) {
-                    // it is possible that if there are multiple threads within the instance that one thread
-                    // trying to grab the task from the other, while the other has not released the lock since
-                    // it did not participate in the rebalance. In this case we can just retry in the next iteration
-                    log.debug("Could not initialize {} due to the following exception; will retry", task.id(), e);
-                    allRunning = false;
-                }
+        final List<StreamTask> restoringTasks = new LinkedList<>();
+        for (final Task task : tasks.allTasks()) {
+            try {
+                task.initializeIfNeeded();
+            } catch (final LockException | TimeoutException e) {
+                // it is possible that if there are multiple threads within the instance that one thread
+                // trying to grab the task from the other, while the other has not released the lock since
+                // it did not participate in the rebalance. In this case we can just retry in the next iteration
+                log.debug("Could not initialize {} due to the following exception; will retry", task.id(), e);
+                allRunning = false;
             }
 
-            if (task.state() == RESTORING) {
-                restoringTasks.add(task);
+            if (task.isActive()) {
+                restoringTasks.add((StreamTask) task);
             }
         }
 
@@ -411,12 +343,12 @@ public class TaskManager {
 
             final Set<TopicPartition> restored = changelogReader.completedChangelogs();
 
-            for (final Task task : restoringTasks) {
-                if (restored.containsAll(task.changelogPartitions())) {
+            for (final StreamTask activeTask : restoringTasks) {
+                if (restored.containsAll(activeTask.changelogPartitions())) {
                     try {
-                        task.completeRestoration();
+                        activeTask.completeRestoration();
                     } catch (final TimeoutException e) {
-                        log.debug("Could not complete restoration for {} due to {}; will retry", task.id(), e);
+                        log.debug("Could not complete restoration for {} due to {}; will retry", activeTask.id(), e);
 
                         allRunning = false;
                     }
@@ -437,14 +369,14 @@ public class TaskManager {
     }
 
     /**
-     * @throws TaskMigratedException if the task producer got fenced (EOS only)
+     * @throws TaskMigratedException if the task producer got fenced (EOS alpha only)
      */
     void handleRevocation(final Collection<TopicPartition> revokedPartitions) {
         final Set<TopicPartition> remainingPartitions = new HashSet<>(revokedPartitions);
 
         final Map<TaskId, Map<TopicPartition, OffsetAndMetadata>> consumedOffsetsAndMetadataPerTask = new HashMap<>();
         final Set<Task> suspended = new HashSet<>();
-        for (final Task task : tasks.values()) {
+        for (final Task task : tasks.allTasks()) {
             if (remainingPartitions.containsAll(task.inputPartitions())) {
                 task.prepareSuspend();
                 final Map<TopicPartition, OffsetAndMetadata> committableOffsets = task.committableOffsetsAndMetadata();
@@ -468,7 +400,7 @@ public class TaskManager {
             commitOffsetsOrTransaction(consumedOffsetsAndMetadataPerTask);
         }
 
-        for (final Task task : tasks.values()) {
+        for (final Task task : tasks.allTasks()) {
             if (consumedOffsetsAndMetadataPerTask.containsKey(task.id())) {
                 if (suspended.contains(task)) {
                     task.suspend();
@@ -495,17 +427,15 @@ public class TaskManager {
     void handleLostAll() {
         log.debug("Closing lost active tasks as zombies.");
 
-        final Iterator<Task> iterator = tasks.values().iterator();
-        while (iterator.hasNext()) {
-            final Task task = iterator.next();
+        final Set<Task> allTask = new HashSet<>(tasks.allTasks());
+        for (final Task task : allTask) {
             // Even though we've apparently dropped out of the group, we can continue safely to maintain our
             // standby tasks while we rejoin.
             if (task.isActive()) {
                 closeTaskDirty(task);
-                iterator.remove();
 
                 try {
-                    activeTaskCreator.closeAndRemoveTaskProducerIfNeeded(task.id());
+                    tasks.cleanUpTaskProducerAndRemoveTask(task.id(), new HashMap<>());
                 } catch (final RuntimeException e) {
                     log.warn("Error closing task producer for " + task.id() + " while handling lostAll", e);
                 }
@@ -513,7 +443,7 @@ public class TaskManager {
         }
 
         if (processingMode == EXACTLY_ONCE_BETA) {
-            activeTaskCreator.reInitializeThreadProducer();
+            tasks.reInitializeThreadProducer();
         }
     }
 
@@ -527,8 +457,8 @@ public class TaskManager {
         final Map<TaskId, Long> taskOffsetSums = new HashMap<>();
 
         for (final TaskId id : lockedTaskDirectories) {
-            final Task task = tasks.get(id);
-            if (task != null) {
+            if (tasks.owned(id))  {
+                final Task task = tasks.task(id);
                 if (task.isActive() && task.state() == RUNNING) {
                     taskOffsetSums.put(id, Task.LATEST_OFFSET);
                 } else {
@@ -566,7 +496,7 @@ public class TaskManager {
                 try {
                     if (stateDirectory.lock(id)) {
                         lockedTaskDirectories.add(id);
-                        if (!tasks.containsKey(id)) {
+                        if (!tasks.owned(id)) {
                             log.debug("Temporarily locked unassigned task {} for the upcoming rebalance", id);
                         }
                     }
@@ -590,7 +520,7 @@ public class TaskManager {
         final Iterator<TaskId> taskIdIterator = lockedTaskDirectories.iterator();
         while (taskIdIterator.hasNext()) {
             final TaskId id = taskIdIterator.next();
-            if (!tasks.containsKey(id)) {
+            if (!tasks.owned(id)) {
                 try {
                     stateDirectory.unlock(id);
                     taskIdIterator.remove();
@@ -625,26 +555,13 @@ public class TaskManager {
 
     private void closeTaskDirty(final Task task) {
         task.prepareCloseDirty();
-        cleanupTask(task);
+        tasks.cleanupTask(task);
         task.closeDirty();
     }
 
     private void completeTaskCloseClean(final Task task, final Map<TopicPartition, Long> checkpoint) {
-        cleanupTask(task);
+        tasks.cleanupTask(task);
         task.closeClean(checkpoint);
-    }
-
-    // Note: this MUST be called *before* actually closing the task
-    private void cleanupTask(final Task task) {
-        // 1. remove the input partitions from the materialized map;
-        // 2. remove the task metrics from the metrics registry
-
-        for (final TopicPartition inputPartition : task.inputPartitions()) {
-            partitionToTask.remove(inputPartition);
-        }
-
-        final String threadId = Thread.currentThread().getName();
-        streamsMetrics.removeAllTaskLevelSensors(threadId, task.id().toString());
     }
 
     void shutdown(final boolean clean) {
@@ -653,7 +570,7 @@ public class TaskManager {
         final Map<Task, Map<TopicPartition, Long>> checkpointPerTask = new HashMap<>();
         final Map<TaskId, Map<TopicPartition, OffsetAndMetadata>> consumedOffsetsAndMetadataPerTask = new HashMap<>();
 
-        for (final Task task : tasks.values()) {
+        for (final Task task : tasks.allTasks()) {
             if (clean) {
                 try {
                     final Map<TopicPartition, Long> checkpoint = task.prepareCloseClean();
@@ -690,16 +607,14 @@ public class TaskManager {
             }
         }
 
-        for (final Task task : tasks.values()) {
-            if (task.isActive()) {
-                try {
-                    activeTaskCreator.closeAndRemoveTaskProducerIfNeeded(task.id());
-                } catch (final RuntimeException e) {
-                    if (clean) {
-                        firstException.compareAndSet(null, e);
-                    } else {
-                        log.warn("Ignoring an exception while closing task " + task.id() + " producer.", e);
-                    }
+        for (final StreamTask activeTask : tasks.activeTasks()) {
+            try {
+                tasks.closeAndRemoveTaskProducerIfNeeded(activeTask);
+            } catch (final RuntimeException e) {
+                if (clean) {
+                    firstException.compareAndSet(null, e);
+                } else {
+                    log.warn("Ignoring an exception while closing task " + activeTask.id() + " producer.", e);
                 }
             }
         }
@@ -707,7 +622,7 @@ public class TaskManager {
         tasks.clear();
 
         try {
-            activeTaskCreator.closeThreadProducerIfNeeded();
+            tasks.closeThreadProducerIfNeeded();
         } catch (final RuntimeException e) {
             if (clean) {
                 firstException.compareAndSet(null, e);
@@ -731,50 +646,43 @@ public class TaskManager {
     }
 
     Set<TaskId> activeTaskIds() {
-        return activeTaskStream()
-            .map(Task::id)
-            .collect(Collectors.toSet());
+        return tasks.activeTaskIds();
     }
 
     Set<TaskId> standbyTaskIds() {
-        return standbyTaskStream()
-            .map(Task::id)
-            .collect(Collectors.toSet());
+        return tasks.standbyTaskIds();
     }
 
-    Task taskForInputPartition(final TopicPartition partition) {
-        return partitionToTask.get(partition);
+    StreamTask activeTasksForInputPartition(final TopicPartition partition) {
+        return tasks.activeTasksForInputPartition(partition);
+    }
+
+    // for testing only
+    void addTask(final TaskId taskId, final Task task) {
+        tasks.addTask(taskId, task);
     }
 
     Map<TaskId, Task> tasks() {
         // not bothering with an unmodifiable map, since the tasks themselves are mutable, but
         // if any outside code modifies the map or the tasks, it would be a severe transgression.
-        return tasks;
+        return tasks.tasksPerId();
     }
 
-    Map<TaskId, Task> activeTaskMap() {
-        return activeTaskStream().collect(Collectors.toMap(Task::id, t -> t));
+    Map<TaskId, StreamTask> activeTaskMap() {
+        return tasks.activeTaskMap();
     }
 
-    List<Task> activeTaskIterable() {
-        return activeTaskStream().collect(Collectors.toList());
+    Collection<StreamTask> activeTasks() {
+        return tasks.activeTasks();
     }
 
-    private Stream<Task> activeTaskStream() {
-        return tasks.values().stream().filter(Task::isActive);
-    }
-
-    Map<TaskId, Task> standbyTaskMap() {
-        return standbyTaskStream().collect(Collectors.toMap(Task::id, t -> t));
-    }
-
-    private Stream<Task> standbyTaskStream() {
-        return tasks.values().stream().filter(t -> !t.isActive());
+    Map<TaskId, StandbyTask> standbyTaskMap() {
+        return tasks.standbyTaskMap();
     }
 
     // For testing only.
     int commitAll() {
-        return commit(tasks.values());
+        return commit(tasks.allTasks());
     }
 
     /**
@@ -782,7 +690,7 @@ public class TaskManager {
      *                               or if the task producer got fenced (EOS)
      * @return number of committed offsets, or -1 if we are in the middle of a rebalance and cannot commit
      */
-    int commit(final Collection<Task> tasks) {
+    int commit(final Collection<? extends Task> tasks) {
         if (rebalanceInProgress) {
             return -1;
         } else {
@@ -821,9 +729,9 @@ public class TaskManager {
         if (rebalanceInProgress) {
             return -1;
         } else {
-            for (final Task task : activeTaskIterable()) {
-                if (task.commitRequested() && task.commitNeeded()) {
-                    return commit(activeTaskIterable());
+            for (final StreamTask activeTask : tasks.activeTasks()) {
+                if (activeTask.commitRequested() && activeTask.commitNeeded()) {
+                    return commit(tasks.activeTasks());
                 }
             }
             return 0;
@@ -833,7 +741,7 @@ public class TaskManager {
     private void commitOffsetsOrTransaction(final Map<TaskId, Map<TopicPartition, OffsetAndMetadata>> offsetsPerTask) {
         if (processingMode == EXACTLY_ONCE_ALPHA) {
             for (final Map.Entry<TaskId, Map<TopicPartition, OffsetAndMetadata>> taskToCommit : offsetsPerTask.entrySet()) {
-                activeTaskCreator.streamsProducerForTask(taskToCommit.getKey())
+                tasks.streamsProducerForTask(taskToCommit.getKey())
                     .commitTransaction(taskToCommit.getValue(), mainConsumer.groupMetadata());
             }
         } else {
@@ -841,7 +749,7 @@ public class TaskManager {
                 .flatMap(e -> e.entrySet().stream()).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
             if (processingMode == EXACTLY_ONCE_BETA) {
-                activeTaskCreator.threadProducer().commitTransaction(allOffsets, mainConsumer.groupMetadata());
+                tasks.threadProducer().commitTransaction(allOffsets, mainConsumer.groupMetadata());
             } else {
                 try {
                     mainConsumer.commitSync(allOffsets);
@@ -865,22 +773,22 @@ public class TaskManager {
         int totalProcessed = 0;
 
         long now = time.milliseconds();
-        for (final Task task : activeTaskIterable()) {
+        for (final StreamTask activeTask : tasks.activeTasks()) {
             try {
                 int processed = 0;
                 final long then = now;
-                while (processed < maxNumRecords && task.process(now)) {
+                while (processed < maxNumRecords && activeTask.process(now)) {
                     processed++;
                 }
                 now = time.milliseconds();
                 totalProcessed += processed;
-                task.recordProcessBatchTime(now - then);
+                activeTask.recordProcessBatchTime(now - then);
             } catch (final TaskMigratedException e) {
                 log.info("Failed to process stream task {} since it got migrated to another thread already. " +
-                             "Will trigger a new rebalance and close all tasks as zombies together.", task.id());
+                             "Will trigger a new rebalance and close all tasks as zombies together.", activeTask.id());
                 throw e;
             } catch (final RuntimeException e) {
-                log.error("Failed to process stream task {} due to the following error:", task.id(), e);
+                log.error("Failed to process stream task {} due to the following error:", activeTask.id(), e);
                 throw e;
             }
         }
@@ -889,8 +797,8 @@ public class TaskManager {
     }
 
     void recordTaskProcessRatio(final long totalProcessLatencyMs, final long now) {
-        for (final Task task : activeTaskIterable()) {
-            task.recordProcessTimeRatioAndBufferSize(totalProcessLatencyMs, now);
+        for (final StreamTask activeTask : tasks.activeTasks()) {
+            activeTask.recordProcessTimeRatioAndBufferSize(totalProcessLatencyMs, now);
         }
     }
 
@@ -900,20 +808,20 @@ public class TaskManager {
     int punctuate() {
         int punctuated = 0;
 
-        for (final Task task : activeTaskIterable()) {
+        for (final StreamTask activeTask : tasks.activeTasks()) {
             try {
-                if (task.maybePunctuateStreamTime()) {
+                if (activeTask.maybePunctuateStreamTime()) {
                     punctuated++;
                 }
-                if (task.maybePunctuateSystemTime()) {
+                if (activeTask.maybePunctuateSystemTime()) {
                     punctuated++;
                 }
             } catch (final TaskMigratedException e) {
                 log.info("Failed to punctuate stream task {} since it got migrated to another thread already. " +
-                             "Will trigger a new rebalance and close all tasks as zombies together.", task.id());
+                             "Will trigger a new rebalance and close all tasks as zombies together.", activeTask.id());
                 throw e;
             } catch (final KafkaException e) {
-                log.error("Failed to punctuate stream task {} due to the following error:", task.id(), e);
+                log.error("Failed to punctuate stream task {} due to the following error:", activeTask.id(), e);
                 throw e;
             }
         }
@@ -933,8 +841,8 @@ public class TaskManager {
             }
 
             final Map<TopicPartition, RecordsToDelete> recordsToDelete = new HashMap<>();
-            for (final Task task : activeTaskIterable()) {
-                for (final Map.Entry<TopicPartition, Long> entry : task.purgeableOffsets().entrySet()) {
+            for (final StreamTask activeTask : tasks.activeTasks()) {
+                for (final Map.Entry<TopicPartition, Long> entry : activeTask.purgeableOffsets().entrySet()) {
                     recordsToDelete.put(entry.getKey(), RecordsToDelete.beforeOffset(entry.getValue()));
                 }
             }
@@ -961,7 +869,7 @@ public class TaskManager {
         stringBuilder.append("TaskManager\n");
         stringBuilder.append(indent).append("\tMetadataState:\n");
         stringBuilder.append(indent).append("\tTasks:\n");
-        for (final Task task : tasks.values()) {
+        for (final Task task : tasks.allTasks()) {
             stringBuilder.append(indent)
                          .append("\t\t")
                          .append(task.id())
@@ -975,11 +883,11 @@ public class TaskManager {
     }
 
     Map<MetricName, Metric> producerMetrics() {
-        return activeTaskCreator.producerMetrics();
+        return tasks.producerMetrics();
     }
 
     Set<String> producerClientIds() {
-        return activeTaskCreator.producerClientIds();
+        return tasks.producerClientIds();
     }
 
     Set<TaskId> lockedTaskDirectories() {

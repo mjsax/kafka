@@ -174,8 +174,10 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         recordQueueCreator = new RecordQueueCreator(logContext, config.defaultTimestampExtractor(), config.defaultDeserializationExceptionHandler());
 
         recordInfo = new PartitionGroup.RecordInfo();
-        partitionGroup = new PartitionGroup(createPartitionQueues(),
-                TaskMetrics.recordLatenessSensor(threadId, taskId, streamsMetrics));
+        partitionGroup = new PartitionGroup(
+            createPartitionQueues(),
+            TaskMetrics.recordLatenessSensor(threadId, taskId, streamsMetrics)
+        );
 
         stateMgr.registerGlobalStateStores(topology.globalStateStores());
     }
@@ -210,13 +212,15 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
             transitionTo(State.RESTORING);
 
             log.info("Initialized");
+        } else {
+            log.trace("Skipping task initialization because state is {}", state());
         }
     }
 
     /**
+     * @throws StreamsException fatal error, should close the thread
      * @throws TimeoutException if fetching committed offsets timed out
      */
-    @Override
     public void completeRestoration() {
         if (state() == State.RESTORING) {
             initializeMetadata();
@@ -367,7 +371,6 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         }
     }
 
-    @Override
     public Map<TopicPartition, OffsetAndMetadata> committableOffsetsAndMetadata() {
         if (state() == State.CLOSED) {
             throw new IllegalStateException("Task " + id + " is closed.");
@@ -513,8 +516,11 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         } else if (state() == State.SUSPENDED) {
             // if `SUSPENDED` do not need to checkpoint, since when suspending we've already committed the state
             checkpoint = null; // `null` indicates to not write a checkpoint
+        } else if (state() == State.CLOSED ) {
+            checkpoint = Collections.emptyMap();
         } else {
-            throw new IllegalStateException("Illegal state " + state() + " while prepare closing active task " + id);
+            // should never happen but indicates a bug
+            throw new IllegalStateException("Unknown state " + state() + " while prepare closing active task " + id);
         }
 
         return checkpoint;
@@ -557,6 +563,9 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
                 executeAndMaybeSwallow(clean, recordCollector::close, "record collector close", log);
 
                 break;
+
+            case CLOSED:
+                return;
 
             default:
                 throw new IllegalStateException("Illegal state " + state() + " while closing active task " + id);
@@ -666,12 +675,10 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         return true;
     }
 
-    @Override
     public void recordProcessBatchTime(final long processBatchTime) {
         processTimeMs += processBatchTime;
     }
 
-    @Override
     public void recordProcessTimeRatioAndBufferSize(final long allTaskProcessMs, final long now) {
         bufferedRecordsSensor.record(partitionGroup.numBuffered());
         processRatioSensor.record((double) processTimeMs / allTaskProcessMs, now);
@@ -784,7 +791,6 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         }
     }
 
-    @Override
     public Map<TopicPartition, Long> purgeableOffsets() {
         final Map<TopicPartition, Long> purgeableConsumedOffsets = new HashMap<>();
         for (final Map.Entry<TopicPartition, Long> entry : consumedOffsets.entrySet()) {
@@ -839,7 +845,6 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
      * @param partition the partition
      * @param records   the records
      */
-    @Override
     public void addRecords(final TopicPartition partition, final Iterable<ConsumerRecord<byte[], byte[]>> records) {
         final int newQueueSize = partitionGroup.addRawRecords(partition, records);
 
@@ -969,7 +974,6 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
     /**
      * Whether or not a request has been made to commit the current state
      */
-    @Override
     public boolean commitRequested() {
         return commitRequested;
     }

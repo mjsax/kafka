@@ -2375,7 +2375,7 @@ public class StreamThreadTest {
         );
     }
 
-    private Collection<Task> createStandbyTask() {
+    private Collection<StandbyTask> createStandbyTask() {
         final LogContext logContext = new LogContext("test");
         final Logger log = logContext.logger(StreamThreadTest.class);
         final StreamsMetricsImpl streamsMetrics =

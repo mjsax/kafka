@@ -48,9 +48,9 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -826,15 +826,15 @@ public class StreamThread extends Thread {
      */
     private void addRecordsToTasks(final ConsumerRecords<byte[], byte[]> records) {
         for (final TopicPartition partition : records.partitions()) {
-            final Task task = taskManager.taskForInputPartition(partition);
+            final StreamTask activeTask = taskManager.activeTasksForInputPartition(partition);
 
-            if (task == null) {
+            if (activeTask == null) {
                 log.error("Unable to locate active task for received-record partition {}. Current tasks: {}",
                     partition, taskManager.toString(">"));
                 throw new NullPointerException("Task was unexpectedly missing for partition " + partition);
             }
 
-            task.addRecords(partition, records.records(partition));
+            activeTask.addRecords(partition, records.records(partition));
         }
     }
 
@@ -966,14 +966,14 @@ public class StreamThread extends Thread {
         return this;
     }
 
-    private void updateThreadMetadata(final Map<TaskId, Task> activeTasks,
-                                      final Map<TaskId, Task> standbyTasks) {
+    private void updateThreadMetadata(final Map<TaskId, StreamTask> activeTasks,
+                                      final Map<TaskId, StandbyTask> standbyTasks) {
         final Set<TaskMetadata> activeTasksMetadata = new HashSet<>();
-        for (final Map.Entry<TaskId, Task> task : activeTasks.entrySet()) {
+        for (final Map.Entry<TaskId, StreamTask> task : activeTasks.entrySet()) {
             activeTasksMetadata.add(new TaskMetadata(task.getKey().toString(), task.getValue().inputPartitions()));
         }
         final Set<TaskMetadata> standbyTasksMetadata = new HashSet<>();
-        for (final Map.Entry<TaskId, Task> task : standbyTasks.entrySet()) {
+        for (final Map.Entry<TaskId, StandbyTask> task : standbyTasks.entrySet()) {
             standbyTasksMetadata.add(new TaskMetadata(task.getKey().toString(), task.getValue().inputPartitions()));
         }
 
@@ -989,12 +989,12 @@ public class StreamThread extends Thread {
             standbyTasksMetadata);
     }
 
-    public Map<TaskId, Task> activeTaskMap() {
+    public Map<TaskId, StreamTask> activeTaskMap() {
         return taskManager.activeTaskMap();
     }
 
-    public List<Task> activeTasks() {
-        return taskManager.activeTaskIterable();
+    public Collection<StreamTask> activeTasks() {
+        return taskManager.activeTasks();
     }
 
     public Map<TaskId, Task> allTasks() {

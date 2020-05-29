@@ -66,8 +66,8 @@ class StandbyTaskCreator {
         );
     }
 
-    Collection<Task> createTasks(final Map<TaskId, Set<TopicPartition>> tasksToBeCreated) {
-        final List<Task> createdTasks = new ArrayList<>();
+    Collection<StandbyTask> createTasks(final Map<TaskId, Set<TopicPartition>> tasksToBeCreated) {
+        final List<StandbyTask> createdTasks = new ArrayList<>();
         for (final Map.Entry<TaskId, Set<TopicPartition>> newTaskAndPartitions : tasksToBeCreated.entrySet()) {
             final TaskId taskId = newTaskAndPartitions.getKey();
             final Set<TopicPartition> partitions = newTaskAndPartitions.getValue();
@@ -124,11 +124,11 @@ class StandbyTaskCreator {
         );
     }
 
-    StandbyTask createStandbyTask(final TaskId taskId,
-                                  final Set<TopicPartition> partitions,
-                                  final ProcessorTopology topology,
-                                  final ProcessorStateManager stateManager,
-                                  final InternalProcessorContext context) {
+    private StandbyTask createStandbyTask(final TaskId taskId,
+                                          final Set<TopicPartition> partitions,
+                                          final ProcessorTopology topology,
+                                          final ProcessorStateManager stateManager,
+                                          final InternalProcessorContext context) {
         final StandbyTask task = new StandbyTask(
             taskId,
             partitions,

@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.errors.LockException;
@@ -39,34 +38,28 @@ public interface Task {
     long LATEST_OFFSET = -2L;
 
     /*
-     *
      * <pre>
      *                 +-------------+
-     *          +<---- | Created (0) | <----------------------+
-     *          |      +-----+-------+                        |
-     *          |            |                                |
-     *          |            v                                |
-     *          |      +-----+-------+                        |
-     *          +<---- | Restoring(1)|<---------------+       |
-     *          |      +-----+-------+                |       |
-     *          |            |                        |       |
-     *          |            +--------------------+   |       |
-     *          |            |                    |   |       |
-     *          |            v                    v   |       |
-     *          |      +-----+-------+       +----+---+----+  |
-     *          |      | Running (2) | ----> | Suspended(3)|  |    //TODO Suspended(3) could be removed after we've stable on KIP-429
-     *          |      +-----+-------+       +------+------+  |
-     *          |            |                      |         |
-     *          |            |                      |         |
-     *          |            v                      |         |
-     *          |      +-----+-------+              |         |
-     *          +----> | Closing (4) | <------------+         |
-     *                 +-----+-------+                        |
-     *                       |                                |
-     *                       v                                |
-     *                 +-----+-------+                        |
-     *                 | Closed (5)  | -----------------------+
-     *                 +-------------+
+     *          +<---- | Created (0) | <-----------------------+
+     *          |      +-----+-------+                         |
+     *          |            |                                 |
+     *          |            v                                 |
+     *          |      +-----+-------+                         |
+     *          +<---- | Restoring(1)|<---------------+        |
+     *          |      +-----+-------+                |        |
+     *          |            |                        |        |
+     *          |            +--------------------+   |        |
+     *          |            |                    |   |        |
+     *          |            v                    v   v        |
+     *          |      +-----+-------+       +----+---+-----+  |
+     *          |      | Running (2) | ----> | Suspended(3) |  |    //TODO Suspended(3) could be removed after we've stable on KIP-429
+     *          |      +-----+-------+       +------+-------+  |
+     *          |            |                      |          |
+     *          |            |                      |          |
+     *          |            v                      |          |
+     *          |      +-----+-------+ <------------+          |
+     *          +----> | Closed  (4) |                         |
+     *                 +-----+-------+ <-----------------------+
      * </pre>
      */
     enum State {
@@ -107,20 +100,11 @@ public interface Task {
 
     boolean isActive();
 
-    boolean isClosed();
-
     /**
      * @throws LockException could happen when multi-threads within the single instance, could retry
      * @throws StreamsException fatal error, should close the thread
      */
     void initializeIfNeeded();
-
-    /**
-     * @throws StreamsException fatal error, should close the thread
-     */
-    void completeRestoration();
-
-    void addRecords(TopicPartition partition, Iterable<ConsumerRecord<byte[], byte[]>> records);
 
     boolean commitNeeded();
 
@@ -202,32 +186,7 @@ public interface Task {
 
     void markChangelogAsCorrupted(final Collection<TopicPartition> partitions);
 
-    default Map<TopicPartition, Long> purgeableOffsets() {
-        return Collections.emptyMap();
-    }
-
     default Map<TopicPartition, OffsetAndMetadata> committableOffsetsAndMetadata() {
         return Collections.emptyMap();
     }
-
-    default void recordProcessBatchTime(final long processBatchTime) {}
-
-    default void recordProcessTimeRatioAndBufferSize(final long allTaskProcessMs, final long now) {}
-
-    default boolean process(final long wallClockTime) {
-        return false;
-    }
-
-    default boolean commitRequested() {
-        return false;
-    }
-
-    default boolean maybePunctuateStreamTime() {
-        return false;
-    }
-
-    default boolean maybePunctuateSystemTime() {
-        return false;
-    }
-
 }

@@ -88,7 +88,8 @@ public class StreamThreadStateStoreProviderTest {
     private File stateDir;
     private final String topicName = "topic";
     private StreamThread threadMock;
-    private Map<TaskId, Task> tasks;
+    private Map<TaskId, StreamTask> tasks;
+    private Map<TaskId, Task> allTasks;
 
     @Before
     public void before() {
@@ -161,6 +162,8 @@ public class StreamThreadStateStoreProviderTest {
             new TaskId(0, 1));
         taskTwo.initializeIfNeeded();
         tasks.put(new TaskId(0, 1), taskTwo);
+
+        allTasks = new HashMap<>(tasks);
 
         threadMock = EasyMock.createNiceMock(StreamThread.class);
         provider = new StreamThreadStateStoreProvider(threadMock, internalTopologyBuilder);
@@ -411,7 +414,7 @@ public class StreamThreadStateStoreProviderTest {
 
     private void mockThread(final boolean initialized) {
         EasyMock.expect(threadMock.isRunning()).andReturn(initialized);
-        EasyMock.expect(threadMock.allTasks()).andStubReturn(tasks);
+        EasyMock.expect(threadMock.allTasks()).andStubReturn(allTasks);
         EasyMock.expect(threadMock.activeTaskMap()).andStubReturn(tasks);
         EasyMock.expect(threadMock.activeTasks()).andStubReturn(new ArrayList<>(tasks.values()));
         EasyMock.expect(threadMock.state()).andReturn(

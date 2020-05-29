@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.utils.LogContext;
@@ -104,11 +103,6 @@ public class StandbyTask extends AbstractTask implements Task {
     }
 
     @Override
-    public void completeRestoration() {
-        throw new IllegalStateException("Standby task " + id + " should never be completing restoration");
-    }
-
-    @Override
     public void prepareSuspend() {
         log.trace("No-op prepareSuspend with state {}", state());
     }
@@ -176,7 +170,7 @@ public class StandbyTask extends AbstractTask implements Task {
      * @throws StreamsException fatal error, should close the thread
      */
     private void prepareClose(final boolean clean) {
-        if (state() == State.CREATED) {
+        if (state() == State.CREATED || state() == State.CLOSED) {
             // the task is created and not initialized, do nothing
             return;
         }
@@ -247,7 +241,9 @@ public class StandbyTask extends AbstractTask implements Task {
                 "state manager close",
                 log
             );
-        } else {
+        } else if (state() == State.CLOSED) {
+            return;
+        }else {
             throw new IllegalStateException("Illegal state " + state() + " while closing standby task " + id);
         }
 
@@ -264,11 +260,6 @@ public class StandbyTask extends AbstractTask implements Task {
     @Override
     public Map<TopicPartition, Long> changelogOffsets() {
         return Collections.unmodifiableMap(stateMgr.changelogOffsets());
-    }
-
-    @Override
-    public void addRecords(final TopicPartition partition, final Iterable<ConsumerRecord<byte[], byte[]>> records) {
-        throw new IllegalStateException("Attempted to add records to task " + id() + " for invalid input partition " + partition);
     }
 
     InternalProcessorContext processorContext() {

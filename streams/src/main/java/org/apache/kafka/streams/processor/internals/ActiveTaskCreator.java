@@ -132,9 +132,9 @@ class ActiveTaskCreator {
         return threadProducer;
     }
 
-    Collection<Task> createTasks(final Consumer<byte[], byte[]> consumer,
-                                 final Map<TaskId, Set<TopicPartition>> tasksToBeCreated) {
-        final List<Task> createdTasks = new ArrayList<>();
+    Collection<StreamTask> createTasks(final Consumer<byte[], byte[]> consumer,
+                                       final Map<TaskId, Set<TopicPartition>> tasksToBeCreated) {
+        final List<StreamTask> createdTasks = new ArrayList<>();
         for (final Map.Entry<TaskId, Set<TopicPartition>> newTaskAndPartitions : tasksToBeCreated.entrySet()) {
             final TaskId taskId = newTaskAndPartitions.getKey();
             final Set<TopicPartition> partitions = newTaskAndPartitions.getValue();
