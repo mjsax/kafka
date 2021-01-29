@@ -35,6 +35,7 @@ import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.apache.kafka.common.metrics.KafkaMetric;
 import org.apache.kafka.common.metrics.Measurable;
 import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.StreamsConfig;
@@ -48,6 +49,7 @@ import org.apache.kafka.streams.processor.internals.Task.State;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
 import org.apache.kafka.streams.state.internals.OffsetCheckpoint;
+import org.apache.kafka.streams.state.internals.ThreadCache;
 import org.easymock.EasyMock;
 import org.easymock.EasyMockRunner;
 import org.easymock.Mock;
@@ -2876,6 +2878,18 @@ public class TaskManagerTest {
 
     private static ConsumerRecord<byte[], byte[]> getConsumerRecord(final TopicPartition topicPartition, final long offset) {
         return new ConsumerRecord<>(topicPartition.topic(), topicPartition.partition(), offset, null, null);
+    }
+
+    private static class MockStreamTask extends StreamTask {
+        public MockStreamTask(TaskId id, Set<TopicPartition> inputPartitions, ProcessorTopology topology, Consumer<byte[], byte[]> mainConsumer, StreamsConfig config, StreamsMetricsImpl streamsMetrics, StateDirectory stateDirectory, ThreadCache cache, Time time, ProcessorStateManager stateMgr, RecordCollector recordCollector, InternalProcessorContext processorContext, LogContext logContext) {
+            super(id, inputPartitions, topology, mainConsumer, config, streamsMetrics, stateDirectory, cache, time, stateMgr, recordCollector, processorContext, logContext);
+        }
+    }
+
+    private static class MockStandbyTask extends StandbyTask {
+        MockStandbyTask(TaskId id, Set<TopicPartition> inputPartitions, ProcessorTopology topology, StreamsConfig config, StreamsMetricsImpl streamsMetrics, ProcessorStateManager stateMgr, StateDirectory stateDirectory, ThreadCache cache, InternalProcessorContext processorContext) {
+            super(id, inputPartitions, topology, config, streamsMetrics, stateMgr, stateDirectory, cache, processorContext);
+        }
     }
 
     private static class StateMachineTask extends AbstractTask implements Task {
