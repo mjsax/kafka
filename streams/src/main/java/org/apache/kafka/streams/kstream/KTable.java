@@ -801,6 +801,7 @@ public interface KTable<K, V> {
      * @return a {@code KTable} that contains records with unmodified key and new values (possibly of different type)
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
+     * @deprecated Since 4.1. Use {@link #processValues(FixedKeyProcessorSupplier, String...)} instead.
      */
     @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
@@ -876,6 +877,7 @@ public interface KTable<K, V> {
      * @return a {@code KTable} that contains records with unmodified key and new values (possibly of different type)
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
+     * @deprecated Since 4.1. Use {@link #processValues(FixedKeyProcessorSupplier, Named, String...)} instead.
      */
     @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
@@ -956,6 +958,7 @@ public interface KTable<K, V> {
      * @return a {@code KTable} that contains records with unmodified key and new values (possibly of different type)
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
+     * @deprecated Since 4.1. Use {@link #processValues(FixedKeyProcessorSupplier, Materialized, String...)} instead.
      */
     @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
@@ -1037,6 +1040,7 @@ public interface KTable<K, V> {
      * @return a {@code KTable} that contains records with unmodified key and new values (possibly of different type)
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
+     * @deprecated Since 4.1. Use {@link #processValues(FixedKeyProcessorSupplier, Materialized, Named, String...)} instead.
      */
     @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
@@ -1044,17 +1048,124 @@ public interface KTable<K, V> {
                                        final Named named,
                                        final String... stateStoreNames);
 
+    /**
+     * Create a new {@code KTable} by transforming the value of each record in this {@code KTable} into a new value
+     * (with possibly a new type), with default serializers, deserializers, and state store.
+     * A {@link org.apache.kafka.streams.processor.api.FixedKeyProcessor FixedKeyProcessor} (provided by the given {@link FixedKeyProcessorSupplier})
+     * is applied to each input record and computes a new value for it.
+     * Thus, an input record {@link org.apache.kafka.streams.processor.api.FixedKeyRecord FixedKeyRecord&lt;K,V&gt;} can be transformed
+     * into an output record {@link org.apache.kafka.streams.processor.api.FixedKeyRecord FixedKeyRecord&lt;K:V'&gt;}.
+     * This is similar to {@link #mapValues(ValueMapperWithKey)}, but more flexible, allowing access to additional state-stores,
+     * and access to the {@link org.apache.kafka.streams.processor.api.FixedKeyProcessorContext FixedKeyProcessorContext}.
+     * Furthermore, via {@link org.apache.kafka.streams.processor.Punctuator#punctuate(long) punctuate()}
+     * the processing progress can be observed and additional periodic actions can be performed.
+     * <p>
+     * If the downstream topology uses aggregation functions, (e.g. {@link KGroupedTable#reduce}, {@link KGroupedTable#aggregate}, etc),
+     * care must be taken when dealing with state, to ensure correct aggregate results.
+     * In contrast, if the resulting KTable is materialized, (cf. {@link #processValues(FixedKeyProcessorSupplier, Materialized, String...)}),
+     * such concerns are handled for you.
+     * <p>
+     * In order to assign a state, the state must be created and registered beforehand:
+     * <pre>{@code
+     * // create store
+     * StoreBuilder<KeyValueStore<String,String>> keyValueStoreBuilder =
+     *     Stores.keyValueStoreBuilder(
+     *         Stores.persistentKeyValueStore("myValueProcessorState"),
+     *         Serdes.String(),
+     *         Serdes.String()
+     *     );
+     * // register store
+     * builder.addStateStore(keyValueStoreBuilder);
+     *
+     * KTable outputTable = inputTable.processValues(new FixedKeyProcessorSupplier() { ... }, "myValueProcessorState");
+     * }</pre>
+     * <p>
+     * Within the {@link FixedKeyProcessorSupplier}, the state is obtained via the
+     * {@link org.apache.kafka.streams.processor.api.FixedKeyProcessorContext FixedKeyProcessorContext}.
+     * To trigger periodic actions via {@link org.apache.kafka.streams.processor.Punctuator#punctuate(long) punctuate()},
+     * a schedule must be registered.
+     * <pre>{@code
+     * new FixedKeyProcessorSupplier<>() {
+     *     FixedKeyProcessor get() {
+     *         return new FixedKeyProcessor<...>() {
+     *             private FixedKeyProcessorContext<KIn, VOut> context;
+     *             private KeyValueStore<String, String> state;
+     *
+     *             void init(FixedKeyProcessorContext<KIn, VOut>) {
+     *                 this.context = context;
+     *                 this.state = context.getStateStore("myValueTransformState");
+     *                 context.schedule(Duration.ofSeconds(1), PunctuationType.WALL_CLOCK_TIME, new Punctuator(..)); // punctuate each 1000ms, can access this.state
+     *             }
+     *
+     *             void process(FixedKeyRecord<KIn, VIn> record) {
+     *                 // can access this.state and use read-only key
+     *
+     *                 // new value (possibly of different type)
+     *                 context.forward(record.withValue(...));
+     *             }
+     *
+     *             void close() {
+     *                 // can access this.state
+     *             }
+     *         }
+     *     }
+     * }
+     * }</pre>
+     * <p>
+     *
+     * @param processorSupplier
+     *        An instance of {@link FixedKeyProcessorSupplier} that generates
+     *        {@link org.apache.kafka.streams.processor.api.FixedKeyProcessor FixedKeyProcessor} instances.
+     *        At least one {@link org.apache.kafka.streams.processor.api.FixedKeyProcessor FixedKeyProcessor} instance
+     *        will be created per streaming task.
+     *        {@link org.apache.kafka.streams.processor.api.FixedKeyProcessor FixedKeyProcessor} do not need to be thread-safe.
+     * @param stateStoreNames
+     *        the names of the state stores used by the processor
+     *
+     * @param <VOut> the value type of the result table
+     *
+     * @return a {@code KTable} that contains records with unmodified key and new values (possibly of different type)
+     *
+     * @see #mapValues(ValueMapper)
+     * @see #mapValues(ValueMapperWithKey)
+     */
     <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
                                          final String... stateStoreNames);
 
+    /**
+     * See {@link #processValues(FixedKeyProcessorSupplier, String...)}.
+     *
+     * <p>Takes an additional {@link Named} parameter that can be used to name the processor in the topology.
+     */
     <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
                                          final Named named,
                                          final String... stateStoreNames);
 
+    /**
+     * See {@link #processValues(FixedKeyProcessorSupplier, String...)}.
+     *
+     * <p>Takes an additional {@link Materialized materialized} parameter which triggers a materialization of the resulting
+     * {@code KTable} into another state store (additional to the provided state store names),
+     * and allows to query the result state store through its given name.
+     *
+     * <pre>{@code
+     * KTable outputTable = inputTable.processValues(
+     *     new FixedKeyProcessorSupplier() { ... },
+     *     Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as("outputTable")
+     *         .withKeySerde(Serdes.String())
+     *         .withValueSerde(Serdes.String())
+     * );
+     * }</pre>
+     */
     <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
                                          final Materialized<K, VOut, KeyValueStore<Bytes, byte[]>> materialized,
                                          final String... stateStoreNames);
 
+    /**
+     * See {@link #processValues(FixedKeyProcessorSupplier, Materialized, String...)}.
+     *
+     * <p>Takes an additional {@link Named} parameter that can be used to name the processor in the topology.
+     */
     <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
                                          final Materialized<K, VOut, KeyValueStore<Bytes, byte[]>> materialized,
                                          final Named named,
