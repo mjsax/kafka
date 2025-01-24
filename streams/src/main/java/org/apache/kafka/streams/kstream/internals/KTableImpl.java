@@ -199,11 +199,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
         final KTableProcessorSupplier<K, V, K, V> processorSupplier =
             new KTableFilter<>(this, predicate, filterNot, queryableStoreName, storeFactory);
 
-        final ProcessorParameters<K, V, ?, ?> processorParameters = unsafeCastProcessorParametersToCompletelyDifferentType(
-            new ProcessorParameters<>(processorSupplier, name)
-        );
-
-        final GraphNode tableNode = new TableFilterNode<>(name, processorParameters);
+        final GraphNode tableNode = new TableFilterNode<>(name, new ProcessorParameters<>(processorSupplier, name));
         maybeSetOutputVersioned(tableNode, materializedInternal);
 
         builder.addGraphNode(this.graphNode, tableNode);
@@ -999,7 +995,6 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
      * We conflate V with Change<V> in many places. This will get fixed in the implementation of KIP-478.
      * For now, I'm just explicitly lying about the parameterized type.
      */
-    @Deprecated
     @SuppressWarnings("unchecked")
     private <VR> ProcessorParameters<K, VR, ?, ?> unsafeCastProcessorParametersToCompletelyDifferentType(final ProcessorParameters<K, Change<V>, ?, ?> kObjectProcessorParameters) {
         return (ProcessorParameters<K, VR, ?, ?>) kObjectProcessorParameters;
@@ -1241,7 +1236,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
         return maybeMulticastPartitions;
     };
 
-    @SuppressWarnings({"unchecked", "deprecation", "resource"})
+    @SuppressWarnings({"resource"})
     private <VR, KO, VO> KTable<K, VR> doJoinOnForeignKey(final KTable<KO, VO> foreignKeyTable,
                                                           final ForeignKeyExtractor<K, V, KO> foreignKeyExtractor,
                                                           final ValueJoiner<V, VO, VR> joiner,
