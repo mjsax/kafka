@@ -27,6 +27,7 @@ import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StreamPartitioner;
+import org.apache.kafka.streams.processor.api.FixedKeyProcessorSupplier;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
@@ -801,6 +802,7 @@ public interface KTable<K, V> {
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
      */
+    @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
                                        final String... stateStoreNames);
 
@@ -875,6 +877,7 @@ public interface KTable<K, V> {
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
      */
+    @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
                                        final Named named,
                                        final String... stateStoreNames);
@@ -954,6 +957,7 @@ public interface KTable<K, V> {
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
      */
+    @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
                                        final Materialized<K, VR, KeyValueStore<Bytes, byte[]>> materialized,
                                        final String... stateStoreNames);
@@ -1034,10 +1038,27 @@ public interface KTable<K, V> {
      * @see #mapValues(ValueMapper)
      * @see #mapValues(ValueMapperWithKey)
      */
+    @Deprecated
     <VR> KTable<K, VR> transformValues(final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VR> transformerSupplier,
                                        final Materialized<K, VR, KeyValueStore<Bytes, byte[]>> materialized,
                                        final Named named,
                                        final String... stateStoreNames);
+
+    <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
+                                         final String... stateStoreNames);
+
+    <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
+                                         final Named named,
+                                         final String... stateStoreNames);
+
+    <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
+                                         final Materialized<K, VOut, KeyValueStore<Bytes, byte[]>> materialized,
+                                         final String... stateStoreNames);
+
+    <VOut> KTable<K, VOut> processValues(final FixedKeyProcessorSupplier<? super K, ? super V, VOut> processorSupplier,
+                                         final Materialized<K, VOut, KeyValueStore<Bytes, byte[]>> materialized,
+                                         final Named named,
+                                         final String... stateStoreNames);
 
     /**
      * Re-groups the records of this {@code KTable} using the provided {@link KeyValueMapper} and default serializers
