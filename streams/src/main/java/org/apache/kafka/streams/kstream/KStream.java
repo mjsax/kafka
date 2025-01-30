@@ -700,15 +700,15 @@ public interface KStream<K, V> {
      * </tr>
      * </table>
      *
-     * Both input streams (or to be more precise, their underlying source topics) need to have the same number of
+     * Both {@code KStreams} (or to be more precise, their underlying source topics) need to have the same number of
      * partitions.
      * If this is not the case (and if not auto-repartitioning happens, see further below),
      * you would need to call {@link #repartition(Repartitioned)} (for at least one of both
-     * input streams) before doing the join and specify the "correct" number of partitions via {@link Repartitioned}
+     * {@code KStreams}) before doing the join and specify the "correct" number of partitions via {@link Repartitioned}
      * parameter to align the partition count for both inputs to each other.
-     * Furthermore, both input streams need to be co-partitioned on the join key (i.e., use the same partitioner).
+     * Furthermore, both {@code KStreams} need to be co-partitioned on the join key (i.e., use the same partitioner).
      * Note: Kafka Streams cannot verify the used partitioning strategy, so it is the user's responsibility to ensure
-     * that the same partitioner is used for both input for the join.
+     * that the same partitioner is used for both inputs for the join.
      *
      * <p>If a key changing operator was used before this operation on either input stream
      * (e.g., {@link #selectKey(KeyValueMapper)}, {@link #map(KeyValueMapper)}, {@link #flatMap(KeyValueMapper)} or
@@ -1028,14 +1028,15 @@ public interface KStream<K, V> {
      * See {@link #join(KTable, ValueJoiner, Joined)} on how to configure a stream-table join to handle out-of-order
      * data.
      *
-     * <p>Both input streams (or to be more precise, their underlying source topics) need to have the same number of
-     * partitions (cf. {@link #join(GlobalKTable, KeyValueMapper, ValueJoiner)}).
-     * If this is not the case (and if not auto-repartitioning happens for the stream, see further below), you would
-     * need to call {@link #repartition(Repartitioned)} for this {@code KStream} before doing the join, specifying the
-     * same number of partitions via {@link Repartitioned} parameter as the given {@link KTable}.
-     * Furthermore, both input streams need to be co-partitioned on the join key (i.e., use the same partitioner).
+     * <p>{@code KStream} and {@link KTable} (or to be more precise, their underlying source topics) need to have the
+     * same number of partitions (cf. {@link #join(GlobalKTable, KeyValueMapper, ValueJoiner)}).
+     * If this is not the case (and if not auto-repartitioning happens for the {@code KStream}, see further below),
+     * you would need to call {@link #repartition(Repartitioned)} for this {@code KStream} before doing the join,
+     * specifying the same number of partitions via {@link Repartitioned} parameter as the given {@link KTable}.
+     * Furthermore, {@code KStream} and {@link KTable} need to be co-partitioned on the join key
+     * (i.e., use the same partitioner).
      * Note: Kafka Streams cannot verify the used partitioning strategy, so it is the user's responsibility to ensure
-     * that the same partitioner is used for both input for the join.
+     * that the same partitioner is used for both inputs for the join.
      *
      * <p>If a key changing operator was used on this {@code KStream} before this operation
      * (e.g., {@link #selectKey(KeyValueMapper)}, {@link #map(KeyValueMapper)}, {@link #flatMap(KeyValueMapper)} or
