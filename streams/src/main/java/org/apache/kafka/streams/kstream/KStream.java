@@ -662,7 +662,7 @@ public interface KStream<K, V> {
                                        final Grouped<KR, V> grouped);
 
     /**
-     * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed inner equi join.
+     * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed inner equi-join.
      * The join is computed on using the records' key as join attribute, i.e., {@code leftRecord.key == rightRight.key}.
      * Furthermore, two records are only joined if their timestamps are close to each other as defined by the given
      * {@link JoinWindows}, i.e., the window defines an additional join predicate on the record timestamps.
@@ -673,7 +673,7 @@ public interface KStream<K, V> {
      * If you need read access to the join key, use {@link #join(KStream, ValueJoinerWithKey, JoinWindows)}.
      * If an input record's key or value is {@code null} the input record will be dropped, and no join computation
      * is triggered.
-     * Similarly, so-call "late records", i.e., records with a timestamp belonging to an already closed window (based
+     * Similarly, so-call late records, i.e., records with a timestamp belonging to an already closed window (based
      * on stream-time progress, window size, and grace period), will be dropped.
      *
      * <p>Example (assuming all input records belong to the correct windows):
@@ -785,7 +785,7 @@ public interface KStream<K, V> {
                                          final StreamJoined<K, V, VRight> streamJoined);
 
     /**
-     * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed left equi join.
+     * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed left equi-join.
      * In contrast to an {@link #join(KStream, ValueJoiner, JoinWindows) inner join}, all records from this stream will
      * produce at least one output record (more details below).
      * The join is computed on using the records' key as join attribute, i.e., {@code leftRecord.key == rightRight.key}.
@@ -877,7 +877,7 @@ public interface KStream<K, V> {
                                              final StreamJoined<K, V, VRight> streamJoined);
 
     /**
-     * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed outer equi join.
+     * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed outer equi-join.
      * In contrast to an {@link #join(KStream, ValueJoiner, JoinWindows) inner join} or
      * {@link #leftJoin(KStream, ValueJoiner, JoinWindows) left join}, all records from both stream will produce at
      * least one output record (more details below).
@@ -1125,7 +1125,7 @@ public interface KStream<K, V> {
                                  final Joined<K, V, VT> joined);
 
     /**
-     * Join records of this stream with {@link KTable}'s records using non-windowed left equi join.
+     * Join records of this stream with {@link KTable}'s records using non-windowed left equi-join.
      * In contrast to an {@link #join(KTable, ValueJoiner) inner join}, all records from this stream will produce an
      * output record (more details below).
      * The join is a primary key table lookup join with join attribute {@code streamRecord.key == tableRecord.key}.
@@ -1196,7 +1196,7 @@ public interface KStream<K, V> {
                                              final ValueJoinerWithKey<? super K, ? super V, ? super VTable, ? extends VOut> joiner);
 
     /**
-     * Join records of this stream with {@link KTable}'s records using non-windowed left equi join.
+     * Join records of this stream with {@link KTable}'s records using non-windowed left equi-join.
      * In contrast to {@link #leftJoin(KTable, ValueJoiner)}, but only if the used {@link KTable} is backed by a
      * {@link org.apache.kafka.streams.state.VersionedKeyValueStore VersionedKeyValueStore}, the additional
      * {@link Joined} parameter allows to specify a join grace-period, to handle out-of-order data gracefully.
@@ -1219,7 +1219,7 @@ public interface KStream<K, V> {
                                      final Joined<K, V, VT> joined);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi-join.
      * The join is a primary key table lookup join with join attribute
      * {@code keyValueMapper.map(stream.keyValue) == table.key}.
      * "Table lookup join" means, that results are only computed if {@code KStream} records are processed.
@@ -1250,7 +1250,7 @@ public interface KStream<K, V> {
                                      final ValueJoiner<? super V, ? super GV, ? extends RV> joiner);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi-join.
      * The join is a primary key table lookup join with join attribute
      * {@code keyValueMapper.map(stream.keyValue) == table.key}.
      * "Table lookup join" means, that results are only computed if {@code KStream} records are processed.
@@ -1282,7 +1282,7 @@ public interface KStream<K, V> {
                                      final ValueJoinerWithKey<? super K, ? super V, ? super GV, ? extends RV> joiner);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi-join.
      * The join is a primary key table lookup join with join attribute
      * {@code keyValueMapper.map(stream.keyValue) == table.key}.
      * "Table lookup join" means, that results are only computed if {@code KStream} records are processed.
@@ -1315,7 +1315,7 @@ public interface KStream<K, V> {
                                      final Named named);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed inner equi-join.
      * The join is a primary key table lookup join with join attribute
      * {@code keyValueMapper.map(stream.keyValue) == table.key}.
      * "Table lookup join" means, that results are only computed if {@code KStream} records are processed.
@@ -1349,7 +1349,7 @@ public interface KStream<K, V> {
                                      final Named named);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi-join.
      * In contrast to {@link #join(GlobalKTable, KeyValueMapper, ValueJoiner) inner-join}, all records from this stream
      * will produce an output record (cf. below).
      * The join is a primary key table lookup join with join attribute
@@ -1384,7 +1384,7 @@ public interface KStream<K, V> {
                                          final ValueJoiner<? super V, ? super GV, ? extends RV> valueJoiner);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi-join.
      * In contrast to {@link #join(GlobalKTable, KeyValueMapper, ValueJoinerWithKey) inner-join}, all records from this stream
      * will produce an output record (cf. below).
      * The join is a primary key table lookup join with join attribute
@@ -1420,7 +1420,7 @@ public interface KStream<K, V> {
                                          final ValueJoinerWithKey<? super K, ? super V, ? super GV, ? extends RV> valueJoiner);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi-join.
      * In contrast to {@link #join(GlobalKTable, KeyValueMapper, ValueJoiner) inner-join}, all records from this stream
      * will produce an output record (cf. below).
      * The join is a primary key table lookup join with join attribute
@@ -1457,7 +1457,7 @@ public interface KStream<K, V> {
                                          final Named named);
 
     /**
-     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi join.
+     * Join records of this stream with {@link GlobalKTable}'s records using non-windowed left equi-join.
      * In contrast to {@link #join(GlobalKTable, KeyValueMapper, ValueJoinerWithKey) inner-join}, all records from this stream
      * will produce an output record (cf. below).
      * The join is a primary key table lookup join with join attribute
