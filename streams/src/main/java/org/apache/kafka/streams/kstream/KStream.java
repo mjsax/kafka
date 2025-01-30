@@ -992,7 +992,7 @@ public interface KStream<K, V> {
      * computation is triggered.
      * If a {@link KTable} input record's key is {@code null} the input record will be dropped, and the table state
      * won't be updated.
-     * {@link KTable} input records with {@code null} values are considered deletes (so-called tombstone) for the table.*
+     * {@link KTable} input records with {@code null} values are considered deletes (so-called tombstone) for the table.
      *
      * <p>Example:
      * <table border='1'>
@@ -1152,7 +1152,7 @@ public interface KStream<K, V> {
      * {@link #join(KTable, ValueJoiner) inner join}) resulting in a left join result.
      * If a {@link KTable} input record's key is {@code null} the input record will be dropped, and the table state
      * won't be updated.
-     * {@link KTable} input records with {@code null} values are considered deletes (so-called tombstone) for the table.*
+     * {@link KTable} input records with {@code null} values are considered deletes (so-called tombstone) for the table.
      *
      * <p>Example:
      * <table border='1'>
