@@ -747,8 +747,8 @@ public interface KStream<K, V> {
      * @param <VRight> the value type of the right stream
      * @param <VOut> the value type of the result stream
      *
-     * @return A {@code KStream} that contains join-records for each key and values computed by the given
-     *         {@link ValueJoiner}, one for each matched record-pair with the same key and within the join window interval.
+     * @return A {@code KStream} that contains join-records, one for each matched record-pair, with the corresponding
+     *         key and a value computed by the given {@link ValueJoiner}.
      *
      * @see #leftJoin(KStream, ValueJoiner, JoinWindows)
      * @see #outerJoin(KStream, ValueJoiner, JoinWindows)
@@ -843,9 +843,9 @@ public interface KStream<K, V> {
      * For more details, about co-partitioning requirements, (auto-)repartitioning, and more see
      * {@link #join(KStream, ValueJoiner, JoinWindows)}.
      *
-     * @return A {@code KStream} that contains join-records for each key and values computed by the given
-     *         {@link ValueJoiner}, one for each matched record-pair with the same key plus one for each non-matching
-     *         record of this {@code KStream} within the join window interval.
+     * @return A {@code KStream} that contains join-records, one for each matched record-pair plus one for each
+     *         non-matching record of this {@code KStream}, with the corresponding key and a value computed by the
+     *         given {@link ValueJoiner}.
      *
      * @see #join(KStream, ValueJoiner, JoinWindows)
      * @see #outerJoin(KStream, ValueJoiner, JoinWindows)
@@ -937,9 +937,9 @@ public interface KStream<K, V> {
      * For more details, about co-partitioning requirements, (auto-)repartitioning, and more see
      * {@link #join(KStream, ValueJoiner, JoinWindows)}.
      *
-     * @return A {@code KStream} that contains join-records for each key and values computed by the given
-     *         {@link ValueJoiner}, one for each matched record-pair with the same key plus one for each non-matching
-     *         record of either input {@code KStream} within the join window interval.
+     * @return A {@code KStream} that contains join-records, one for each matched record-pair plus one for each
+     *         non-matching record of either input {@code KStream}, with the corresponding key and a value computed
+     *         by the given {@link ValueJoiner}.
      *
      * @see #join(KStream, ValueJoiner, JoinWindows)
      * @see #leftJoin(KStream, ValueJoiner, JoinWindows)
@@ -1065,8 +1065,8 @@ public interface KStream<K, V> {
      * @param <VTable> the value type of the table
      * @param <VOut> the value type of the result stream
      *
-     * @return A {@code KStream} that contains join-records for each key and values computed by the given
-     *         {@link ValueJoiner}, one for each matched record-pair with the same key
+     * @return A {@code KStream} that contains join-records, one for each matched stream record, with the corresponding
+     *         key and a value computed by the given {@link ValueJoiner}.
      *
      * @see #leftJoin(KTable, ValueJoiner)
      */
@@ -1190,6 +1190,11 @@ public interface KStream<K, V> {
      *
      * <p>For more details, about co-partitioning requirements, (auto-)repartitioning, and more see
      * {@link #join(KStream, ValueJoiner, JoinWindows)}.
+     *
+     * @return A {@code KStream} that contains join-records, one for each matched stream record plus one for each
+     *         non-matching stream record, with the corresponding key and a value computed by the given {@link ValueJoiner}.
+     *
+     * @see #join(KTable, ValueJoiner)
      */
     <VTable, VOut> KStream<K, VOut> leftJoin(final KTable<K, VTable> table,
                                              final ValueJoiner<? super V, ? super VTable, ? extends VOut> joiner);
