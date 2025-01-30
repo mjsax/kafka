@@ -808,8 +808,12 @@ public interface KStream<K, V> {
      * <p>The key of the result record is the same as for both joining input records,
      * or the left input record's key for a left-join result.
      * If you need read access to the join key, use {@link #leftJoin(KStream, ValueJoinerWithKey, JoinWindows)}.
-     * If an input record's key or value is {@code null} the input record will be dropped, and no join computation
+     * If a <em>left</em> input record's value is {@code null} the input record will be dropped, and no join computation
      * is triggered.
+     * Note, that for <em>left</em> input records, {@code null} keys are supported (in contrast to
+     * {@link #join(KStream, ValueJoiner, JoinWindows) inner join}), resulting in a left join result.
+     * If a <em>right</em> input record's key or value is {@code null} the input record will be dropped, and no join
+     * computation is triggered.
      *
      * <p>Example (assuming all input records belong to the correct windows, not taking actual emit/window-close time
      * for left-join results, or eager/spurious results into account):
@@ -901,8 +905,9 @@ public interface KStream<K, V> {
      * <p>The key of the result record is the same as for both joining input records,
      * or the left/right input record's key for an outer-join result, respectively.
      * If you need read access to the join key, use {@link #outerJoin(KStream, ValueJoinerWithKey, JoinWindows)}.
-     * If an input record's key or value is {@code null} the input record will be dropped, and no join computation
-     * is triggered.
+     * If an input record's value is {@code null} the input record will be dropped, and no join computation is triggered.
+     * Note, that input records with {@code null} keys are supported (in contrast to
+     * {@link #join(KStream, ValueJoiner, JoinWindows) inner join}), resulting in left/right join results.
      *
      * <p>Example (assuming all input records belong to the correct windows, not taking actual emit/window-close time
      * for outer-join result, or eager/spurious results into account):
@@ -1141,8 +1146,10 @@ public interface KStream<K, V> {
      * The key of the result record is the same as for both joining input records,
      * or the {@code KStreams} input record's key for a left-join result.
      * If you need read access to the join key, use {@link #leftJoin(KTable, ValueJoinerWithKey)}.
-     * If a {@code KStream} input record's key or value is {@code null} the input record will be dropped, and no join
+     * If a {@code KStream} input record's value is {@code null} the input record will be dropped, and no join
      * computation is triggered.
+     * Note, that {@code null} keys for {@code KStream} input records are supported (in contrast to
+     * {@link #join(KTable, ValueJoiner) inner join}) resulting in a left join result.
      * If a {@link KTable} input record's key is {@code null} the input record will be dropped, and the table state
      * won't be updated.
      * {@link KTable} input records with {@code null} values are considered deletes (so-called tombstone) for the table.*
