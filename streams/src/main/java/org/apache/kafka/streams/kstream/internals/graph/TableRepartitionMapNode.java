@@ -14,28 +14,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.streams.kstream.internals.KTableRepartitionMap;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 
-public class TableRepartitionMapNode<K, V> extends ProcessorGraphNode<K, V> implements VersionedSemanticsGraphNode {
+public class TableRepartitionMapNode<KIn, VIn, KOut, VOut>
+    extends ProcessorGraphNode<KIn, VIn, KOut, VOut>
+    implements VersionedSemanticsGraphNode {
 
     public TableRepartitionMapNode(final String nodeName,
-                                   final ProcessorParameters<K, V, ?, ?> processorParameters) {
+                                   final ProcessorParameters<KIn, VIn, KOut, VOut> processorParameters) {
         super(nodeName, processorParameters);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void enableVersionedSemantics(final boolean useVersionedSemantics, final String parentNodeName) {
-        final ProcessorSupplier<K, V, ?, ?> processorSupplier = processorParameters().processorSupplier();
+        final ProcessorSupplier<?, ?, ?, ?> processorSupplier = processorParameters().processorSupplier();
         if (!(processorSupplier instanceof KTableRepartitionMap)) {
             throw new IllegalStateException("Unexpected processor type for table repartition map: " + processorSupplier.getClass().getName());
         }
 
-        final KTableRepartitionMap<K, V, ?, ?> tableRepartitionMap = (KTableRepartitionMap<K, V, ?, ?>) processorSupplier;
+        final KTableRepartitionMap<?, ?, ?, ?> tableRepartitionMap = (KTableRepartitionMap<?, ?, ?, ?>) processorSupplier;
         tableRepartitionMap.setUseVersionedSemantics(useVersionedSemantics);
     }
 }

@@ -49,8 +49,7 @@ public class KTableSource<KIn, VIn> implements ProcessorSupplier<KIn, VIn, KIn, 
     private String queryableName;
     private boolean sendOldValues;
 
-    public KTableSource(
-            final MaterializedInternal<KIn, VIn, KeyValueStore<Bytes, byte[]>> materialized) {
+    public KTableSource(final MaterializedInternal<KIn, VIn, KeyValueStore<Bytes, byte[]>> materialized) {
         this.storeName = materialized.storeName();
         Objects.requireNonNull(storeName, "storeName can't be null");
         this.queryableName = materialized.queryableStoreName();
@@ -100,7 +99,6 @@ public class KTableSource<KIn, VIn> implements ProcessorSupplier<KIn, VIn, KIn, 
         private TimestampedTupleForwarder<KIn, VIn> tupleForwarder;
         private Sensor droppedRecordsSensor;
 
-        @SuppressWarnings("unchecked")
         @Override
         public void init(final ProcessorContext<KIn, Change<VIn>> context) {
             this.context = context;

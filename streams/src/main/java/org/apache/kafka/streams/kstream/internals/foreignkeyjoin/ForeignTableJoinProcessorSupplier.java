@@ -45,6 +45,7 @@ import java.util.Set;
 
 public class ForeignTableJoinProcessorSupplier<K, KO, VO> implements
     ProcessorSupplier<KO, Change<VO>, K, SubscriptionResponseWrapper<VO>> {
+
     private static final Logger LOG = LoggerFactory.getLogger(ForeignTableJoinProcessorSupplier.class);
     private final StoreFactory subscriptionStoreFactory;
     private final CombinedKeySchema<KO, K> keySchema;

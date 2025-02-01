@@ -14,19 +14,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
+
+import org.apache.kafka.streams.kstream.internals.Change;
 
 /**
  * Represents a stateful {@link ProcessorGraphNode} where a semantic grace period is defined for the processor
  * and its state.
  */
-public class GracePeriodGraphNode<K, V> extends ProcessorGraphNode<K, V> {
+public class GracePeriodGraphNode<K, V, K2, V2> extends ProcessorGraphNode<K, V, K2, Change<V2>> {
 
     private final long gracePeriod;
 
     public GracePeriodGraphNode(final String nodeName,
-                                final ProcessorParameters<K, V, ?, ?> processorParameters,
+                                final ProcessorParameters<K, V, K2, Change<V2>> processorParameters,
                                 final long gracePeriod) {
         super(nodeName, processorParameters);
         this.gracePeriod = gracePeriod;

@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
@@ -24,19 +23,19 @@ import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
  *
  * map, mapValues, flatMap, flatMapValues, filter, filterNot, branch
  */
-public class ProcessorGraphNode<K, V> extends GraphNode {
+public class ProcessorGraphNode<KIn, VIn, KOut, VOut> extends GraphNode {
 
-    private final ProcessorParameters<K, V, ?, ?> processorParameters;
+    private final ProcessorParameters<KIn, VIn, KOut, VOut> processorParameters;
 
     public ProcessorGraphNode(final String nodeName,
-                              final ProcessorParameters<K, V, ?, ?> processorParameters) {
+                              final ProcessorParameters<KIn, VIn, KOut, VOut> processorParameters) {
 
         super(nodeName);
 
         this.processorParameters = processorParameters;
     }
 
-    public ProcessorParameters<K, V, ?, ?> processorParameters() {
+    public ProcessorParameters<KIn, VIn, KOut, VOut> processorParameters() {
         return processorParameters;
     }
 

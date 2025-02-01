@@ -195,9 +195,8 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
         final KTableProcessorSupplier<K, V, K, V> processorSupplier =
             new KTableFilter<>(this, predicate, filterNot, queryableStoreName, storeFactory);
 
-        final ProcessorParameters<K, V, ?, ?> processorParameters = unsafeCastProcessorParametersToCompletelyDifferentType(
-            new ProcessorParameters<>(processorSupplier, name)
-        );
+        final ProcessorParameters<K, Change<V>, K, Change<V>> processorParameters =
+            new ProcessorParameters<>(processorSupplier, name);
 
         final GraphNode tableNode = new TableFilterNode<>(name, processorParameters);
         maybeSetOutputVersioned(tableNode, materializedInternal);
@@ -503,11 +502,9 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
 
         final String name = new NamedInternal(named).orElseGenerateWithPrefix(builder, TOSTREAM_NAME);
         final KStreamMapValues<K, Change<V>, V> kStreamMapValues = new KStreamMapValues<>((key, change) -> change.newValue);
-        final ProcessorParameters<K, V, ?, ?> processorParameters = unsafeCastProcessorParametersToCompletelyDifferentType(
-            new ProcessorParameters<>(kStreamMapValues, name)
-        );
+        final ProcessorParameters<K, Change<V>, K, V> processorParameters = new ProcessorParameters<>(kStreamMapValues, name);
 
-        final ProcessorGraphNode<K, V> toStreamNode = new ProcessorGraphNode<>(
+        final ProcessorGraphNode<K, Change<V>, K, V> toStreamNode = new ProcessorGraphNode<>(
             name,
             processorParameters
         );
@@ -575,7 +572,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
                 this
         );
 
-        final ProcessorGraphNode<K, Change<V>> node = new TableSuppressNode<>(
+        final ProcessorGraphNode<K, Change<V>, K, Change<V>> node = new TableSuppressNode<>(
             name,
             new ProcessorParameters<>(suppressionSupplier, name)
         );
@@ -829,10 +826,10 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
         final String selectName = new NamedInternal(groupedInternal.name()).orElseGenerateWithPrefix(builder, SELECT_NAME);
 
         final KTableRepartitionMapSupplier<K, V, KeyValue<? extends K1, ? extends V1>, K1, V1> selectSupplier = new KTableRepartitionMap<>(this, selector);
-        final ProcessorParameters<K, Change<V>, ?, ?> processorParameters = new ProcessorParameters<>(selectSupplier, selectName);
+        final ProcessorParameters<K, Change<V>, K1, Change<V1>> processorParameters = new ProcessorParameters<>(selectSupplier, selectName);
 
         // select the aggregate key and values (old and new), it would require parent to send old values
-        final TableRepartitionMapNode<K, Change<V>> groupByMapNode = new TableRepartitionMapNode<>(selectName, processorParameters);
+        final TableRepartitionMapNode<K, Change<V>, K1, Change<V1>> groupByMapNode = new TableRepartitionMapNode<>(selectName, processorParameters);
 
         builder.addGraphNode(this.graphNode, groupByMapNode);
 
@@ -1249,7 +1246,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
             keySerde
         );
 
-        final ProcessorGraphNode<K, Change<V>> subscriptionSendNode = new ForeignJoinSubscriptionSendNode<>(
+        final ProcessorGraphNode<K, Change<V>, KO, SubscriptionWrapper<K>> subscriptionSendNode = new ForeignJoinSubscriptionSendNode<>(
             new ProcessorParameters<>(
                 new SubscriptionSendProcessorSupplier<>(
                     foreignKeyExtractor,
@@ -1297,12 +1294,13 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
 
         final String subscriptionReceiveName = renamed.suffixWithOrElseGet(
             "-subscription-receive", builder, SUBSCRIPTION_PROCESSOR);
-        final ProcessorGraphNode<KO, SubscriptionWrapper<K>> subscriptionReceiveNode =
+        final ProcessorGraphNode<KO, SubscriptionWrapper<K>,  CombinedKey<KO, K>, Change<ValueAndTimestamp<SubscriptionWrapper<K>>>> subscriptionReceiveNode =
             new ProcessorGraphNode<>(
                 subscriptionReceiveName,
                 new ProcessorParameters<>(
                     new SubscriptionReceiveProcessorSupplier<>(subscriptionStoreFactory, combinedKeySchema),
-                    subscriptionReceiveName)
+                    subscriptionReceiveName
+                )
             );
         builder.addGraphNode(subscriptionSource, subscriptionReceiveNode);
 
@@ -1321,7 +1319,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
 
         final String foreignTableJoinName = renamed
             .suffixWithOrElseGet("-foreign-join-subscription", builder, SUBSCRIPTION_PROCESSOR);
-        final ProcessorGraphNode<KO, Change<VO>> foreignTableJoinNode = new ForeignTableJoinNode<>(
+        final ProcessorGraphNode<KO, Change<VO>, K, SubscriptionResponseWrapper<VO>> foreignTableJoinNode = new ForeignTableJoinNode<>(
             new ProcessorParameters<>(
                 new ForeignTableJoinProcessorSupplier<>(subscriptionStoreFactory, combinedKeySchema),
                 foreignTableJoinName
@@ -1398,7 +1396,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
 
         final KTableSource<K, VR> resultProcessorSupplier = new KTableSource<>(materializedInternal);
 
-        final ProcessorGraphNode<K, VR> resultNode = new ProcessorGraphNode<>(
+        final ProcessorGraphNode<K, VR, K, Change<VR>> resultNode = new ProcessorGraphNode<>(
             resultProcessorName,
             new ProcessorParameters<>(
                 resultProcessorSupplier,

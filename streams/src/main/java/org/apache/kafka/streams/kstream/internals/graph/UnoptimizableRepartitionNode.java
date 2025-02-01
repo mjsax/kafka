@@ -83,18 +83,22 @@ public class UnoptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V
         return new UnoptimizableRepartitionNodeBuilder<>();
     }
 
-    public static final class UnoptimizableRepartitionNodeBuilder<K, V> extends BaseRepartitionNodeBuilder<K, V, UnoptimizableRepartitionNode<K, V>> {
+    public static final class UnoptimizableRepartitionNodeBuilder<K, V>
+        extends BaseRepartitionNodeBuilder<K, V, UnoptimizableRepartitionNode<K, V>> {
+
         @Override
         public UnoptimizableRepartitionNode<K, V> build() {
-            return new UnoptimizableRepartitionNode<>(nodeName,
-                                                      sourceName,
-                                                      processorParameters,
-                                                      keySerde,
-                                                      valueSerde,
-                                                      sinkName,
-                                                      repartitionTopic,
-                                                      partitioner,
-                                                      internalTopicProperties);
+            return new UnoptimizableRepartitionNode<>(
+                nodeName,
+                sourceName,
+                processorParameters,
+                keySerde,
+                valueSerde,
+                sinkName,
+                repartitionTopic,
+                partitioner,
+                internalTopicProperties
+            );
         }
     }
 }

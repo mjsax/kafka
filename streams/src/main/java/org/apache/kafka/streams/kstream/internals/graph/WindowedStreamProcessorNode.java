@@ -16,7 +16,7 @@
  */
 package org.apache.kafka.streams.kstream.internals.graph;
 
-public class WindowedStreamProcessorNode<K, V> extends ProcessorGraphNode<K, V> {
+public class WindowedStreamProcessorNode<K, V> extends ProcessorGraphNode<K, V, K, V> {
 
     private final String windowStoreName;
 
@@ -24,7 +24,7 @@ public class WindowedStreamProcessorNode<K, V> extends ProcessorGraphNode<K, V> 
      * Create a node representing a Stream Join Window processor.
      */
     public WindowedStreamProcessorNode(final String windowStoreName,
-                                       final ProcessorParameters<K, V, ?, ?> processorParameters) {
+                                       final ProcessorParameters<K, V, K, V> processorParameters) {
         super(processorParameters.processorName(), processorParameters);
         this.windowStoreName = windowStoreName;
     }

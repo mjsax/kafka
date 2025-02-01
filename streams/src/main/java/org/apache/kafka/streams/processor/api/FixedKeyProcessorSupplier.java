@@ -33,7 +33,8 @@ import java.util.function.Supplier;
  */
 @FunctionalInterface
 public interface FixedKeyProcessorSupplier<KIn, VIn, VOut>
-    extends ConnectedStoreProvider, Supplier<FixedKeyProcessor<KIn, VIn, VOut>> {
+    extends ConnectedStoreProvider,
+            Supplier<FixedKeyProcessor<? super KIn, ? super VIn, ? extends VOut>> {
 
     /**
      * Return a newly constructed {@link FixedKeyProcessor} instance.
@@ -44,5 +45,5 @@ public interface FixedKeyProcessorSupplier<KIn, VIn, VOut>
      *
      * @return a new {@link FixedKeyProcessor} instance
      */
-    FixedKeyProcessor<KIn, VIn, VOut> get();
+    FixedKeyProcessor<? super KIn, ? super VIn, ? extends VOut> get();
 }

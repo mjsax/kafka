@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.common.serialization.Serde;
@@ -84,7 +83,7 @@ public class KTableKTableJoinNode<K, V1, V2, VR> extends BaseJoinProcessorNode<K
     /**
      * The supplier which provides processor with KTable-KTable join merge functionality.
      */
-    @SuppressWarnings("unchecked")
+    //@SuppressWarnings("unchecked")
     public KTableKTableJoinMerger<K, VR> joinMerger() {
         final ProcessorSupplier<K, Change<VR>, K, Change<VR>> kChangeProcessorSupplier = (ProcessorSupplier<K, Change<VR>, K, Change<VR>>) mergeProcessorParameters().processorSupplier();
         return (KTableKTableJoinMerger<K, VR>) kChangeProcessorSupplier;
@@ -96,15 +95,14 @@ public class KTableKTableJoinNode<K, V1, V2, VR> extends BaseJoinProcessorNode<K
         enableVersionedSemantics(otherProcessorParameters(), useVersionedSemantics, parentNodeName);
     }
 
-    @SuppressWarnings("unchecked")
-    private void enableVersionedSemantics(final ProcessorParameters<K, ?, ?, ?> processorParameters,
+    private void enableVersionedSemantics(final ProcessorParameters<?, ?, ?, ?> processorParameters,
                                           final boolean useVersionedSemantics,
                                           final String parentNodeName) {
-        final ProcessorSupplier<K, ?, ?, ?> processorSupplier = processorParameters.processorSupplier();
+        final ProcessorSupplier<?, ?, ?, ?> processorSupplier = processorParameters.processorSupplier();
         if (!(processorSupplier instanceof KTableKTableAbstractJoin)) {
             throw new IllegalStateException("Unexpected processor type for table-table join: " + processorSupplier.getClass().getName());
         }
-        final KTableKTableAbstractJoin<K, ?, ?, ?> tableJoin = (KTableKTableAbstractJoin<K, ?, ?, ?>) processorSupplier;
+        final KTableKTableAbstractJoin<?, ?, ?, ?> tableJoin = (KTableKTableAbstractJoin<?, ?, ?, ?>) processorSupplier;
 
         if (parentNodeName.equals(tableJoin.joinThisParentNodeName())) {
             tableJoin.setUseVersionedSemantics(useVersionedSemantics);

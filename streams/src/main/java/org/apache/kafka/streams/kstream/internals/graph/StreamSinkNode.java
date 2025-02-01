@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.common.serialization.Serializer;
@@ -34,7 +33,6 @@ public class StreamSinkNode<K, V> extends GraphNode {
     public StreamSinkNode(final String nodeName,
                           final TopicNameExtractor<K, V> topicNameExtractor,
                           final ProducedInternal<K, V> producedInternal) {
-
         super(nodeName);
 
         this.topicNameExtractor = topicNameExtractor;
@@ -51,7 +49,7 @@ public class StreamSinkNode<K, V> extends GraphNode {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings("resource")
     public void writeToTopology(final InternalTopologyBuilder topologyBuilder) {
         final Serializer<K> keySerializer = producedInternal.keySerde() == null ? null : producedInternal.keySerde().serializer();
         final Serializer<V> valSerializer = producedInternal.valueSerde() == null ? null : producedInternal.valueSerde().serializer();

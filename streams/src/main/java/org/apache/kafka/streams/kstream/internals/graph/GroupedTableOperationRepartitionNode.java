@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.common.serialization.Deserializer;
@@ -27,7 +26,6 @@ import org.apache.kafka.streams.processor.internals.InternalTopicProperties;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 
 public class GroupedTableOperationRepartitionNode<K, V> extends BaseRepartitionNode<K, V> {
-
 
     private GroupedTableOperationRepartitionNode(final String nodeName,
                                                  final Serde<K> keySerde,

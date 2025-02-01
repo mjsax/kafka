@@ -17,15 +17,19 @@
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.SubscriptionSendProcessorSupplier;
+import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.SubscriptionWrapper;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 
-public class ForeignJoinSubscriptionSendNode<K, V> extends ProcessorGraphNode<K, V> implements VersionedSemanticsGraphNode {
+public class ForeignJoinSubscriptionSendNode<KLeft, VLeft, KRight>
+    extends ProcessorGraphNode<KLeft, VLeft, KRight, SubscriptionWrapper<KLeft>>
+    implements VersionedSemanticsGraphNode {
 
-    public ForeignJoinSubscriptionSendNode(final ProcessorParameters<K, V, ?, ?> processorParameters) {
+    public ForeignJoinSubscriptionSendNode(
+        final ProcessorParameters<KLeft, VLeft, KRight, SubscriptionWrapper<KLeft>> processorParameters
+    ) {
         super(processorParameters.processorName(), processorParameters);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void enableVersionedSemantics(final boolean useVersionedSemantics, final String parentNodeName) {
         final ProcessorSupplier<?, ?, ?, ?> processorSupplier = processorParameters().processorSupplier();

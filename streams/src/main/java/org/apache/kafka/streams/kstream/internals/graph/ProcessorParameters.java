@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.streams.internals.ApiUtils;
@@ -55,11 +54,11 @@ public class ProcessorParameters<KIn, VIn, KOut, VOut> {
         this.processorName = processorName;
     }
 
-    public ProcessorSupplier<KIn, VIn, KOut, VOut> processorSupplier() {
+    public ProcessorSupplier<? extends KIn, ? extends VIn, ? super KOut, ? super VOut> processorSupplier() {
         return processorSupplier;
     }
 
-    public FixedKeyProcessorSupplier<KIn, VIn, VOut> fixedKeyProcessorSupplier() {
+    public FixedKeyProcessorSupplier<? extends KIn, ? extends VIn, ? super VOut> fixedKeyProcessorSupplier() {
         return fixedKeyProcessorSupplier;
     }
 
@@ -67,7 +66,7 @@ public class ProcessorParameters<KIn, VIn, KOut, VOut> {
         if (processorSupplier != null) {
             ApiUtils.checkSupplier(processorSupplier);
 
-            final ProcessorSupplier<KIn, VIn, KOut, VOut> wrapped =
+            final ProcessorSupplier<? extends KIn, ? extends VIn, ? super KOut, ? super VOut> wrapped =
                 topologyBuilder.wrapProcessorSupplier(processorName, processorSupplier);
 
             topologyBuilder.addProcessor(processorName, wrapped, parentNodeNames);
@@ -82,7 +81,7 @@ public class ProcessorParameters<KIn, VIn, KOut, VOut> {
         if (fixedKeyProcessorSupplier != null) {
             ApiUtils.checkSupplier(fixedKeyProcessorSupplier);
 
-            final FixedKeyProcessorSupplier<KIn, VIn, VOut> wrapped =
+            final FixedKeyProcessorSupplier<? extends KIn, ? extends VIn, ? super VOut> wrapped =
                 topologyBuilder.wrapFixedKeyProcessorSupplier(processorName, fixedKeyProcessorSupplier);
 
             topologyBuilder.addProcessor(processorName, wrapped, parentNodeNames);

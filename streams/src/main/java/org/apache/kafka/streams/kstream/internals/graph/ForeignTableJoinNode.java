@@ -16,12 +16,18 @@
  */
 package org.apache.kafka.streams.kstream.internals.graph;
 
+import org.apache.kafka.streams.kstream.internals.Change;
 import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.ForeignTableJoinProcessorSupplier;
+import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.SubscriptionResponseWrapper;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 
-public class ForeignTableJoinNode<K, V> extends ProcessorGraphNode<K, V> implements VersionedSemanticsGraphNode {
+public class ForeignTableJoinNode<KLeft, KRight, VRight>
+    extends ProcessorGraphNode<KRight, Change<VRight>, KLeft, SubscriptionResponseWrapper<VRight>>
+    implements VersionedSemanticsGraphNode {
 
-    public ForeignTableJoinNode(final ProcessorParameters<K, V, ?, ?> processorParameters) {
+    public ForeignTableJoinNode(
+        final ProcessorParameters<KRight, Change<VRight>, KLeft, SubscriptionResponseWrapper<VRight>> processorParameters
+    ) {
         super(processorParameters.processorName(), processorParameters);
     }
 

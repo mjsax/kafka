@@ -27,6 +27,7 @@ import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.internals.graph.BaseRepartitionNode;
 import org.apache.kafka.streams.kstream.internals.graph.GlobalStoreNode;
+import org.apache.kafka.streams.kstream.internals.graph.GlobalTableSourceNode;
 import org.apache.kafka.streams.kstream.internals.graph.GraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.NodesWithRelaxedNullKeyJoinDownstream;
 import org.apache.kafka.streams.kstream.internals.graph.OptimizableRepartitionNode;
@@ -79,7 +80,7 @@ public class InternalStreamsBuilder implements InternalNameProvider {
     private final LinkedHashSet<GraphNode> mergeNodes = new LinkedHashSet<>();
     private final LinkedHashSet<GraphNode> tableSourceNodes = new LinkedHashSet<>();
     private final LinkedHashSet<GraphNode> versionedSemanticsNodes = new LinkedHashSet<>();
-    private final LinkedHashSet<TableSuppressNode> tableSuppressNodesNodes = new LinkedHashSet<>();
+    private final LinkedHashSet<TableSuppressNode<?, ?>> tableSuppressNodesNodes = new LinkedHashSet<>();
 
     private static final String TOPOLOGY_ROOT = "root";
     private static final Logger LOG = LoggerFactory.getLogger(InternalStreamsBuilder.class);
@@ -141,7 +142,7 @@ public class InternalStreamsBuilder implements InternalNameProvider {
             .orElseGenerateWithPrefix(this, KTableImpl.SOURCE_NAME);
 
         final KTableSource<K, V> tableSource = new KTableSource<>(materialized);
-        final ProcessorParameters<K, V, ?, ?> processorParameters = new ProcessorParameters<>(tableSource, tableSourceName);
+        final ProcessorParameters<K, V, K, Change<V>> processorParameters = new ProcessorParameters<>(tableSource, tableSourceName);
 
         final TableSourceNode<K, V> tableSourceNode = TableSourceNode.<K, V>tableSourceNodeBuilder()
             .withTopic(topic)
@@ -189,12 +190,11 @@ public class InternalStreamsBuilder implements InternalNameProvider {
 
         final ProcessorParameters<K, V, ?, ?> processorParameters = new ProcessorParameters<>(tableSource, processorName);
 
-        final TableSourceNode<K, V> tableSourceNode = TableSourceNode.<K, V>tableSourceNodeBuilder()
+        final GlobalTableSourceNode<K, V> tableSourceNode = GlobalTableSourceNode.<K, V>globalTableSourceNodeBuilder()
             .withTopic(topic)
-            .isGlobalKTable(true)
             .withSourceName(sourceName)
             .withConsumedInternal(consumed)
-            .withProcessorParameters(processorParameters)
+            .withGlobalProcessorParameters((ProcessorParameters<K, V, Void, Void>)processorParameters)
             .build();
 
         addGraphNode(root, tableSourceNode);
@@ -431,12 +431,11 @@ public class InternalStreamsBuilder implements InternalNameProvider {
      * We iterate over all the siblings to identify these two nodes so that we can remove the
      * latter.
      */
-    @SuppressWarnings("unchecked")
     private void rewriteSingleStoreSelfJoin(
         final GraphNode currentNode, final Map<GraphNode, Boolean> visited) {
         visited.put(currentNode, true);
         if (currentNode instanceof StreamStreamJoinNode && currentNode.parentNodes().size() == 1) {
-            final StreamStreamJoinNode joinNode = (StreamStreamJoinNode) currentNode;
+            final StreamStreamJoinNode<?, ?, ?, ?> joinNode = (StreamStreamJoinNode<?, ?, ?, ?>) currentNode;
             // Remove JoinOtherWindowed node
             final GraphNode parent = joinNode.parentNodes().stream().findFirst().get();
             GraphNode left = null, right = null;
@@ -615,18 +614,18 @@ public class InternalStreamsBuilder implements InternalNameProvider {
         return repartitionNodes.iterator().next().repartitionTopic();
     }
 
-    @SuppressWarnings("unchecked")
-    private <K, V> GroupedInternal<K, V> getRepartitionSerdes(final Collection<OptimizableRepartitionNode<?, ?>> repartitionNodes) {
-        Serde<K> keySerde = null;
-        Serde<V> valueSerde = null;
+    @SuppressWarnings("resource")
+    private GroupedInternal<?, ?> getRepartitionSerdes(final Collection<OptimizableRepartitionNode<?, ?>> repartitionNodes) {
+        Serde<?> keySerde = null;
+        Serde<?> valueSerde = null;
 
         for (final OptimizableRepartitionNode<?, ?> repartitionNode : repartitionNodes) {
             if (keySerde == null && repartitionNode.keySerde() != null) {
-                keySerde = (Serde<K>) repartitionNode.keySerde();
+                keySerde = repartitionNode.keySerde();
             }
 
             if (valueSerde == null && repartitionNode.valueSerde() != null) {
-                valueSerde = (Serde<V>) repartitionNode.valueSerde();
+                valueSerde = repartitionNode.valueSerde();
             }
 
             if (keySerde != null && valueSerde != null) {

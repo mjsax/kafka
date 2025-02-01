@@ -1045,7 +1045,7 @@ public class InternalStreamsBuilderTest {
         // Then:
         final GraphNode repartitionMap = getNodeByType(builder.root, TableRepartitionMapNode.class, new HashSet<>());
         assertNotNull(repartitionMap);
-        verifyVersionedSemantics((TableRepartitionMapNode<?, ?>) repartitionMap, true);
+        verifyVersionedSemantics((TableRepartitionMapNode<?, ?, ?, ?>) repartitionMap, true);
     }
 
     @Test
@@ -1063,7 +1063,7 @@ public class InternalStreamsBuilderTest {
         // Then:
         final GraphNode repartitionMap = getNodeByType(builder.root, TableRepartitionMapNode.class, new HashSet<>());
         assertNotNull(repartitionMap);
-        verifyVersionedSemantics((TableRepartitionMapNode<?, ?>) repartitionMap, true);
+        verifyVersionedSemantics((TableRepartitionMapNode<?, ?, ?, ?>) repartitionMap, true);
     }
 
     @Test
@@ -1160,11 +1160,11 @@ public class InternalStreamsBuilderTest {
         // Then:
         final GraphNode joinThis = getNodeByType(builder.root, ForeignJoinSubscriptionSendNode.class, new HashSet<>());
         assertNotNull(joinThis);
-        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?>) joinThis, true);
+        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?, ?>) joinThis, true);
 
         final GraphNode joinOther = getNodeByType(builder.root, ForeignTableJoinNode.class, new HashSet<>());
         assertNotNull(joinOther);
-        verifyVersionedSemantics((ForeignTableJoinNode<?, ?>) joinOther, true);
+        verifyVersionedSemantics((ForeignTableJoinNode<?, ?, ?>) joinOther, true);
     }
 
     @Test
@@ -1184,11 +1184,11 @@ public class InternalStreamsBuilderTest {
         // Then:
         final GraphNode joinThis = getNodeByType(builder.root, ForeignJoinSubscriptionSendNode.class, new HashSet<>());
         assertNotNull(joinThis);
-        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?>) joinThis, true);
+        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?, ?>) joinThis, true);
 
         final GraphNode joinOther = getNodeByType(builder.root, ForeignTableJoinNode.class, new HashSet<>());
         assertNotNull(joinOther);
-        verifyVersionedSemantics((ForeignTableJoinNode<?, ?>) joinOther, false);
+        verifyVersionedSemantics((ForeignTableJoinNode<?, ?, ?>) joinOther, false);
     }
 
     @Test
@@ -1208,11 +1208,11 @@ public class InternalStreamsBuilderTest {
         // Then:
         final GraphNode joinThis = getNodeByType(builder.root, ForeignJoinSubscriptionSendNode.class, new HashSet<>());
         assertNotNull(joinThis);
-        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?>) joinThis, false);
+        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?, ?>) joinThis, false);
 
         final GraphNode joinOther = getNodeByType(builder.root, ForeignTableJoinNode.class, new HashSet<>());
         assertNotNull(joinOther);
-        verifyVersionedSemantics((ForeignTableJoinNode<?, ?>) joinOther, true);
+        verifyVersionedSemantics((ForeignTableJoinNode<?, ?, ?>) joinOther, true);
     }
 
     @Test
@@ -1229,11 +1229,11 @@ public class InternalStreamsBuilderTest {
         // Then:
         final GraphNode joinThis = getNodeByType(builder.root, ForeignJoinSubscriptionSendNode.class, new HashSet<>());
         assertNotNull(joinThis);
-        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?>) joinThis, true);
+        verifyVersionedSemantics((ForeignJoinSubscriptionSendNode<?, ?, ?>) joinThis, true);
 
         final GraphNode joinOther = getNodeByType(builder.root, ForeignTableJoinNode.class, new HashSet<>());
         assertNotNull(joinOther);
-        verifyVersionedSemantics((ForeignTableJoinNode<?, ?>) joinOther, true);
+        verifyVersionedSemantics((ForeignTableJoinNode<?, ?, ?>) joinOther, true);
     }
 
     private void verifyVersionedSemantics(final TableFilterNode<?, ?> filterNode, final boolean expectedValue) {
@@ -1243,7 +1243,7 @@ public class InternalStreamsBuilderTest {
         assertEquals(expectedValue, tableFilter.isUseVersionedSemantics());
     }
 
-    private void verifyVersionedSemantics(final TableRepartitionMapNode<?, ?> repartitionMapNode, final boolean expectedValue) {
+    private void verifyVersionedSemantics(final TableRepartitionMapNode<?, ?, ?, ?> repartitionMapNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> processorSupplier = repartitionMapNode.processorParameters().processorSupplier();
         assertInstanceOf(KTableRepartitionMap.class, processorSupplier);
         final KTableRepartitionMap<?, ?, ?, ?> repartitionMap = (KTableRepartitionMap<?, ?, ?, ?>) processorSupplier;
@@ -1262,14 +1262,14 @@ public class InternalStreamsBuilderTest {
         assertEquals(expectedValueRight, otherJoin.isUseVersionedSemantics());
     }
 
-    private void verifyVersionedSemantics(final ForeignJoinSubscriptionSendNode<?, ?> joinThisNode, final boolean expectedValue) {
+    private void verifyVersionedSemantics(final ForeignJoinSubscriptionSendNode<?, ?, ?> joinThisNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> thisProcessorSupplier = joinThisNode.processorParameters().processorSupplier();
         assertInstanceOf(SubscriptionSendProcessorSupplier.class, thisProcessorSupplier);
         final SubscriptionSendProcessorSupplier<?, ?, ?> joinThis = (SubscriptionSendProcessorSupplier<?, ?, ?>) thisProcessorSupplier;
         assertEquals(expectedValue, joinThis.isUseVersionedSemantics());
     }
 
-    private void verifyVersionedSemantics(final ForeignTableJoinNode<?, ?> joinOtherNode, final boolean expectedValue) {
+    private void verifyVersionedSemantics(final ForeignTableJoinNode<?, ?, ?> joinOtherNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> otherProcessorSupplier = joinOtherNode.processorParameters().processorSupplier();
         assertInstanceOf(ForeignTableJoinProcessorSupplier.class, otherProcessorSupplier);
         final ForeignTableJoinProcessorSupplier<?, ?, ?> joinThis = (ForeignTableJoinProcessorSupplier<?, ?, ?>) otherProcessorSupplier;

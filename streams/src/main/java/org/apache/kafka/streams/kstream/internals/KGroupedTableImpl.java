@@ -129,6 +129,7 @@ public class KGroupedTableImpl<K, V> extends AbstractStream<K, V> implements KGr
         return reduce(adder, subtractor, NamedInternal.empty(), materialized);
     }
 
+    @SuppressWarnings("resource")
     @Override
     public KTable<K, V> reduce(final Reducer<V> adder,
                                final Reducer<V> subtractor,
@@ -166,6 +167,7 @@ public class KGroupedTableImpl<K, V> extends AbstractStream<K, V> implements KGr
         return count(NamedInternal.empty(), materialized);
     }
 
+    @SuppressWarnings("resource")
     @Override
     public KTable<K, Long> count(final Named named, final Materialized<K, Long, KeyValueStore<Bytes, byte[]>> materialized) {
         final MaterializedInternal<K, Long, KeyValueStore<Bytes, byte[]>> materializedInternal =
@@ -205,6 +207,7 @@ public class KGroupedTableImpl<K, V> extends AbstractStream<K, V> implements KGr
         return aggregate(initializer, adder, subtractor, NamedInternal.empty(), materialized);
     }
 
+    @SuppressWarnings("resource")
     @Override
     public <VAgg> KTable<K, VAgg> aggregate(final Initializer<VAgg> initializer,
                                         final Aggregator<? super K, ? super V, VAgg> adder,

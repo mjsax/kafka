@@ -32,7 +32,7 @@ import java.util.Set;
  * operator where the user's custom processor supplier doesn't implement the #stores method
  * and has to be connected to the store when compiling the topology.
  */
-public class ProcessorToStateConnectorNode<K, V> extends ProcessorGraphNode<K, V> {
+public class ProcessorToStateConnectorNode<K, V> extends ProcessorGraphNode<K, V, Object, Object> {
 
     private final String[] storeNames;
 

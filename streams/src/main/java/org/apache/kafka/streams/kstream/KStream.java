@@ -993,7 +993,7 @@ public interface KStream<K, V> {
      *
      * @param <KOut> the new key type of the result {@link KGroupedStream}
      */
-    <KOut> KGroupedStream<KOut, V> groupBy(final KeyValueMapper<? super K, ? super V, KOut> keySelector);
+    <KOut> KGroupedStream<KOut, V> groupBy(final KeyValueMapper<? super K, ? super V, ? extends KOut> keySelector);
 
     /**
      * See {@link #groupBy(KeyValueMapper)}.
@@ -1001,7 +1001,7 @@ public interface KStream<K, V> {
      * <p>Takes an additional {@link Grouped} parameter, that allows to explicitly set key/value serdes or to customize
      * the name of the created internal repartition topic.
      */
-    <KOut> KGroupedStream<KOut, V> groupBy(final KeyValueMapper<? super K, ? super V, KOut> keySelector,
+    <KOut> KGroupedStream<KOut, V> groupBy(final KeyValueMapper<? super K, ? super V,  ? extends KOut> keySelector,
                                            final Grouped<KOut, V> grouped);
 
     /**
@@ -2985,7 +2985,7 @@ public interface KStream<K, V> {
      * @see #map(KeyValueMapper)
      */
     <KOut, VOut> KStream<KOut, VOut> process(
-        final ProcessorSupplier<? super K, ? super V, ? extends KOut, ? extends VOut> processorSupplier,
+        final ProcessorSupplier<K, V, KOut, VOut> processorSupplier,
         final String... stateStoreNames
     );
 
@@ -3085,7 +3085,7 @@ public interface KStream<K, V> {
      * @see #processValues(FixedKeyProcessorSupplier, Named, String...)
      */
     <KOut, VOut> KStream<KOut, VOut> process(
-        final ProcessorSupplier<? super K, ? super V, ? extends KOut, ? extends VOut> processorSupplier,
+        final ProcessorSupplier<K, V, KOut, VOut> processorSupplier,
         final Named named,
         final String... stateStoreNames
     );
@@ -3185,7 +3185,7 @@ public interface KStream<K, V> {
      * @see #process(ProcessorSupplier, Named, String...)
      */
     <VOut> KStream<K, VOut> processValues(
-        final FixedKeyProcessorSupplier<? super K, ? super V, ? extends VOut> processorSupplier,
+        final FixedKeyProcessorSupplier<K, V, VOut> processorSupplier,
         final String... stateStoreNames
     );
 
@@ -3285,7 +3285,7 @@ public interface KStream<K, V> {
      * @see #process(ProcessorSupplier, Named, String...)
      */
     <VOut> KStream<K, VOut> processValues(
-        final FixedKeyProcessorSupplier<? super K, ? super V, ? extends VOut> processorSupplier,
+        final FixedKeyProcessorSupplier<K, V, VOut> processorSupplier,
         final Named named,
         final String... stateStoreNames
     );

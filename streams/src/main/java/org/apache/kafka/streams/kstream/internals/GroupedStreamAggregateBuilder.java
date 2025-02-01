@@ -75,7 +75,7 @@ class GroupedStreamAggregateBuilder<K, V> {
                                              final boolean isOutputVersioned) {
         final String aggFunctionName = functionName.name();
 
-        final ProcessorGraphNode<K, V> aggProcessorNode =
+        final ProcessorGraphNode<K, V, KR, Change<VR>> aggProcessorNode =
             new ProcessorGraphNode<>(
                 aggFunctionName,
                 new ProcessorParameters<>(aggregateSupplier, aggFunctionName)
@@ -96,7 +96,7 @@ class GroupedStreamAggregateBuilder<K, V> {
                                           final boolean isOutputVersioned) {
         final String aggFunctionName = functionName.name();
 
-        final GracePeriodGraphNode<K, V> gracePeriodAggProcessorNode =
+        final GracePeriodGraphNode<K, V, KR, VR> gracePeriodAggProcessorNode =
             new GracePeriodGraphNode<>(
                 aggFunctionName,
                 new ProcessorParameters<>(aggregateSupplier, aggFunctionName),
@@ -111,7 +111,7 @@ class GroupedStreamAggregateBuilder<K, V> {
     private <KR, VR> KTable<KR, VR> build(final String aggFunctionName,
                                           final String storeName,
                                           final KStreamAggProcessorSupplier<K, V, KR, VR> aggregateSupplier,
-                                          final ProcessorGraphNode<K, V> aggProcessorNode,
+                                          final ProcessorGraphNode<K, V, KR, Change<VR>> aggProcessorNode,
                                           final String queryableStoreName,
                                           final Serde<KR> keySerde,
                                           final Serde<VR> valueSerde) {

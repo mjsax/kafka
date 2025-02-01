@@ -38,16 +38,18 @@ import java.util.function.Supplier;
  * @param <VOut> the type of output values
  */
 @FunctionalInterface
-public interface ProcessorSupplier<KIn, VIn, KOut, VOut> extends ConnectedStoreProvider, Supplier<Processor<KIn, VIn, KOut, VOut>> {
+public interface ProcessorSupplier<KIn, VIn, KOut, VOut>
+    extends ConnectedStoreProvider,
+            Supplier<Processor<? super KIn, ? super VIn, ? extends KOut, ? extends VOut>> {
 
     /**
      * Return a newly constructed {@link Processor} instance.
-     * The supplier should always generate a new instance each time {@link  ProcessorSupplier#get()} gets called.
+     * The supplier should always generate a new instance each time {@link ProcessorSupplier#get()} gets called.
      * <p>
      * Creating a single {@link Processor} object and returning the same object reference in {@link ProcessorSupplier#get()}
      * is a violation of the supplier pattern and leads to runtime exceptions.
      *
      * @return a new {@link Processor} instance
      */
-    Processor<KIn, VIn, KOut, VOut> get();
+    Processor<? super KIn, ? super VIn, ? extends KOut, ? extends VOut> get();
 }

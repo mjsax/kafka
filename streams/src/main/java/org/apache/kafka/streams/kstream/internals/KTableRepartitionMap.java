@@ -37,13 +37,17 @@ import static org.apache.kafka.streams.state.ValueAndTimestamp.getValueOrNull;
  * <p>
  * Given the input, it can output at most two records (one mapped from old value and one mapped from new value).
  */
-public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapSupplier<K, V, KeyValue<? extends K1, ? extends V1>, K1, V1> {
+public class KTableRepartitionMap<KIn, VIn, KOut, VOut>
+    implements KTableRepartitionMapSupplier<KIn, VIn, KeyValue<? extends KOut, ? extends VOut>, KOut, VOut> {
 
-    private final KTableImpl<K, ?, V> parent;
-    private final KeyValueMapper<? super K, ? super V, ? extends KeyValue<? extends K1, ? extends V1>> mapper;
+    private final KTableImpl<KIn, ?, VIn> parent;
+    private final KeyValueMapper<? super KIn, ? super VIn, ? extends KeyValue<? extends KOut, ? extends VOut>> mapper;
     private boolean useVersionedSemantics = false;
 
-    KTableRepartitionMap(final KTableImpl<K, ?, V> parent, final KeyValueMapper<? super K, ? super V, ? extends KeyValue<? extends K1, ? extends V1>> mapper) {
+    KTableRepartitionMap(
+        final KTableImpl<KIn, ?, VIn> parent,
+        final KeyValueMapper<? super KIn, ? super VIn, ? extends KeyValue<? extends KOut, ? extends VOut>> mapper
+    ) {
         this.parent = parent;
         this.mapper = mapper;
     }
@@ -58,17 +62,17 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
     }
 
     @Override
-    public Processor<K, Change<V>, K1, Change<V1>> get() {
+    public Processor<KIn, Change<VIn>, KOut, Change<VOut>> get() {
         return new KTableMapProcessor();
     }
 
     @Override
-    public KTableValueGetterSupplier<K, KeyValue<? extends K1, ? extends V1>> view() {
-        final KTableValueGetterSupplier<K, V> parentValueGetterSupplier = parent.valueGetterSupplier();
+    public KTableValueGetterSupplier<KIn, KeyValue<? extends KOut, ? extends VOut>> view() {
+        final KTableValueGetterSupplier<KIn, VIn> parentValueGetterSupplier = parent.valueGetterSupplier();
 
         return new KTableValueGetterSupplier<>() {
 
-            public KTableValueGetter<K, KeyValue<? extends K1, ? extends V1>> get() {
+            public KTableValueGetter<KIn, KeyValue<? extends KOut, ? extends VOut>> get() {
                 return new KTableMapValueGetter(parentValueGetterSupplier.get());
             }
 
@@ -88,7 +92,7 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
         throw new IllegalStateException("KTableRepartitionMap should always require sending old values.");
     }
 
-    private class KTableMapProcessor extends ContextualProcessor<K, Change<V>, K1, Change<V1>> {
+    private class KTableMapProcessor extends ContextualProcessor<KIn, Change<VIn>, KOut, Change<VOut>> {
 
         private boolean isNotUpgrade;
 
@@ -128,7 +132,7 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
         }
 
         @Override
-        public void init(final ProcessorContext<K1, Change<V1>> context) {
+        public void init(final ProcessorContext<KOut, Change<VOut>> context) {
             super.init(context);
             isNotUpgrade = isNotUpgrade(context().appConfigs());
         }
@@ -137,7 +141,7 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
          * @throws StreamsException if key is null
          */
         @Override
-        public void process(final Record<K, Change<V>> record) {
+        public void process(final Record<KIn, Change<VIn>> record) {
             // the original key should never be null
             if (record.key() == null) {
                 throw new StreamsException("Record key for the grouping KTable should not be null.");
@@ -152,9 +156,9 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
             }
 
             // if the value is null, we do not need to forward its selected key-value further
-            final KeyValue<? extends K1, ? extends V1> newPair = record.value().newValue == null ? null :
+            final KeyValue<? extends KOut, ? extends VOut> newPair = record.value().newValue == null ? null :
                 mapper.apply(record.key(), record.value().newValue);
-            final KeyValue<? extends K1, ? extends V1> oldPair = record.value().oldValue == null ? null :
+            final KeyValue<? extends KOut, ? extends VOut> oldPair = record.value().oldValue == null ? null :
                 mapper.apply(record.key(), record.value().oldValue);
 
             // if the selected repartition key or value is null, skip
@@ -176,11 +180,11 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
         }
     }
 
-    private class KTableMapValueGetter implements KTableValueGetter<K, KeyValue<? extends K1, ? extends V1>> {
-        private final KTableValueGetter<K, V> parentGetter;
+    private class KTableMapValueGetter implements KTableValueGetter<KIn, KeyValue<? extends KOut, ? extends VOut>> {
+        private final KTableValueGetter<KIn, VIn> parentGetter;
         private InternalProcessorContext<?, ?> context;
 
-        KTableMapValueGetter(final KTableValueGetter<K, V> parentGetter) {
+        KTableMapValueGetter(final KTableValueGetter<KIn, VIn> parentGetter) {
             this.parentGetter = parentGetter;
         }
 
@@ -191,12 +195,12 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
         }
 
         @Override
-        public ValueAndTimestamp<KeyValue<? extends K1, ? extends V1>> get(final K key) {
+        public ValueAndTimestamp<KeyValue<? extends KOut, ? extends VOut>> get(final KIn key) {
             return mapValue(key, parentGetter.get(key));
         }
 
         @Override
-        public ValueAndTimestamp<KeyValue<? extends K1, ? extends V1>> get(final K key, final long asOfTimestamp) {
+        public ValueAndTimestamp<KeyValue<? extends KOut, ? extends VOut>> get(final KIn key, final long asOfTimestamp) {
             return mapValue(key, parentGetter.get(key, asOfTimestamp));
         }
 
@@ -210,7 +214,7 @@ public class KTableRepartitionMap<K, V, K1, V1> implements KTableRepartitionMapS
             parentGetter.close();
         }
 
-        private ValueAndTimestamp<KeyValue<? extends K1, ? extends V1>> mapValue(final K key, final ValueAndTimestamp<V> valueAndTimestamp) {
+        private ValueAndTimestamp<KeyValue<? extends KOut, ? extends VOut>> mapValue(final KIn key, final ValueAndTimestamp<VIn> valueAndTimestamp) {
             return ValueAndTimestamp.make(
                 mapper.apply(key, getValueOrNull(valueAndTimestamp)),
                 valueAndTimestamp == null ? context.recordContext().timestamp() : valueAndTimestamp.timestamp()

@@ -14,28 +14,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.streams.kstream.internals.KTableFilter;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 
-public class TableFilterNode<K, V> extends ProcessorGraphNode<K, V> implements VersionedSemanticsGraphNode {
+public class TableFilterNode<K, V> extends ProcessorGraphNode<K, V, K, V> implements VersionedSemanticsGraphNode {
 
     public TableFilterNode(final String nodeName,
-                           final ProcessorParameters<K, V, ?, ?> processorParameters) {
+                           final ProcessorParameters<K, V, K, V> processorParameters) {
         super(nodeName, processorParameters);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void enableVersionedSemantics(final boolean useVersionedSemantics, final String parentNodeName) {
-        final ProcessorSupplier<K, V, ?, ?> processorSupplier = processorParameters().processorSupplier();
+        final ProcessorSupplier<?, ?, ?, ?> processorSupplier = processorParameters().processorSupplier();
         if (!(processorSupplier instanceof KTableFilter)) {
             throw new IllegalStateException("Unexpected processor type for table filter: " + processorSupplier.getClass().getName());
         }
 
-        final KTableFilter<K, V> tableFilter = (KTableFilter<K, V>) processorSupplier;
+        final KTableFilter<?, ?> tableFilter = (KTableFilter<?, ?>) processorSupplier;
         tableFilter.setUseVersionedSemantics(useVersionedSemantics);
     }
 }

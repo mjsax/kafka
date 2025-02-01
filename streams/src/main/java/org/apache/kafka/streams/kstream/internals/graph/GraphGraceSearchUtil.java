@@ -25,7 +25,6 @@ public final class GraphGraceSearchUtil {
         return findAndVerifyWindowGrace(graphNode, "");
     }
 
-    @SuppressWarnings("rawtypes")
     private static long findAndVerifyWindowGrace(final GraphNode graphNode, final String chain) {
         // error base case: we traversed off the end of the graph without finding a window definition
         if (graphNode == null) {
@@ -35,10 +34,10 @@ public final class GraphGraceSearchUtil {
         }
         // base case: return if this node defines a grace period.
         if (graphNode instanceof GracePeriodGraphNode) {
-            return ((GracePeriodGraphNode) graphNode).gracePeriod();
+            return ((GracePeriodGraphNode<?, ?>) graphNode).gracePeriod();
         }
 
-        final String newChain = chain.equals("") ? graphNode.nodeName() : graphNode.nodeName() + "->" + chain;
+        final String newChain = chain.isEmpty() ? graphNode.nodeName() : graphNode.nodeName() + "->" + chain;
 
         if (graphNode.parentNodes().isEmpty()) {
             // error base case: we traversed to the end of the graph without finding a window definition
