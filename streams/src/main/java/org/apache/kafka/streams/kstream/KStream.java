@@ -788,7 +788,7 @@ public interface KStream<K, V> {
      * Join records of this (left) stream with another (right) {@code KStream}'s records using a windowed left equi-join.
      * In contrast to an {@link #join(KStream, ValueJoiner, JoinWindows) inner join}, all records from this stream will
      * produce at least one output record (more details below).
-     * The join is computed on using the records' key as join attribute, i.e., {@code leftRecord.key == rightRight.key}.
+     * The join is computed using the records' key as join attribute, i.e., {@code leftRecord.key == rightRight.key}.
      * Furthermore, two records are only joined if their timestamps are close to each other as defined by the given
      * {@link JoinWindows}, i.e., the window defines an additional join predicate on the record timestamps.
      *
@@ -814,6 +814,8 @@ public interface KStream<K, V> {
      * {@link #join(KStream, ValueJoiner, JoinWindows) inner join}), resulting in a left join result.
      * If a <em>right</em> input record's key or value is {@code null} the input record will be dropped, and no join
      * computation is triggered.
+     * For input record of either side, so-called late records, i.e., records with a timestamp belonging to an already
+     * closed window (based on stream-time progress, window size, and grace period), will be dropped.
      *
      * <p>Example (assuming all input records belong to the correct windows, not taking actual emit/window-close time
      * for left-join results, or eager/spurious results into account):
@@ -885,7 +887,7 @@ public interface KStream<K, V> {
      * In contrast to an {@link #join(KStream, ValueJoiner, JoinWindows) inner join} or
      * {@link #leftJoin(KStream, ValueJoiner, JoinWindows) left join}, all records from both stream will produce at
      * least one output record (more details below).
-     * The join is computed on using the records' key as join attribute, i.e., {@code leftRecord.key == rightRight.key}.
+     * The join is computed using the records' key as join attribute, i.e., {@code leftRecord.key == rightRight.key}.
      * Furthermore, two records are only joined if their timestamps are close to each other as defined by the given
      * {@link JoinWindows}, i.e., the window defines an additional join predicate on the record timestamps.
      *
@@ -908,6 +910,8 @@ public interface KStream<K, V> {
      * If an input record's value is {@code null} the input record will be dropped, and no join computation is triggered.
      * Note, that input records with {@code null} keys are supported (in contrast to
      * {@link #join(KStream, ValueJoiner, JoinWindows) inner join}), resulting in left/right join results.
+     * For input record of either side, so-called late records, i.e., records with a timestamp belonging to an already
+     * closed window (based on stream-time progress, window size, and grace period), will be dropped.
      *
      * <p>Example (assuming all input records belong to the correct windows, not taking actual emit/window-close time
      * for outer-join result, or eager/spurious results into account):
