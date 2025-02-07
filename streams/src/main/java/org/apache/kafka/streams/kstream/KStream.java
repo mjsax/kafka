@@ -1592,7 +1592,7 @@ public interface KStream<K, V> {
      * Even if any upstream operation was key-changing, no auto-repartition is triggered.
      * If repartitioning is required, a call to {@link #repartition()} should be performed before {@code process()}.
      * <p>
-     * Processing records might result in an internal data redistribution if a key based operator (like an aggregation
+     * Processing records might result in an internal data redistribution if a key-based operator (like an aggregation
      * or join) is applied to the result {@code KStream}.
      * (cf. {@link #processValues(FixedKeyProcessorSupplier, String...)})
      *
@@ -1691,7 +1691,7 @@ public interface KStream<K, V> {
      * Even if any upstream operation was key-changing, no auto-repartition is triggered.
      * If repartitioning is required, a call to {@link #repartition()} should be performed before {@code process()}.
      * <p>
-     * Processing records might result in an internal data redistribution if a key based operator (like an aggregation
+     * Processing records might result in an internal data redistribution if a key-based operator (like an aggregation
      * or join) is applied to the result {@code KStream}.
      * (cf. {@link #processValues(FixedKeyProcessorSupplier, Named, String...)})
      *
@@ -1793,7 +1793,7 @@ public interface KStream<K, V> {
      * If repartitioning is required, a call to {@link #repartition()} should be performed before {@code process()}.
      * <p>
      * Setting a new value preserves data co-location with respect to the key.
-     * Thus, <em>no</em> internal data redistribution is required if a key based operator (like an aggregation or join)
+     * Thus, <em>no</em> internal data redistribution is required if a key-based operator (like an aggregation or join)
      * is applied to the result {@code KStream}. (cf. {@link #process(ProcessorSupplier, String...)})
      *
      * @param processorSupplier an instance of {@link FixedKeyProcessorSupplier} that generates a newly constructed {@link FixedKeyProcessor}
