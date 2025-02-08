@@ -18,10 +18,21 @@ package org.apache.kafka.streams.processor.api;
 
 /**
  * An abstract implementation of {@link FixedKeyProcessor} that manages the {@link FixedKeyProcessorContext} instance.
- *
- * @param <KIn> the type of input keys
- * @param <VIn> the type of input values
- * @param <VOut> the type of output values
+
+ * <p>Using this interface instead of {@link FixedKeyProcessor} may avoid undesired boilerplate code:
+ * <pre>{@code
+ * public class MyProcessor implements ContextualFixedKeyProcessor<String String, Integer> {
+ *   @Override
+ *   public void process(final FixedKeyRecord<String, String> record) {
+ *     // use FixedKeyProcessorContext w/o the need to overwrite `init(FixedKeyProcessorContext<KIn, VOut>)` method
+ *     context().forward(...);
+ *   }
+ * }
+ * }</pre>
+
+ * @param <KIn> the input record key type
+ * @param <VIn> the input record value type
+ * @param <VOut> the output record key type
  */
 public abstract class ContextualFixedKeyProcessor<KIn, VIn, VOut> implements FixedKeyProcessor<KIn, VIn, VOut> {
 
@@ -35,9 +46,11 @@ public abstract class ContextualFixedKeyProcessor<KIn, VIn, VOut> implements Fix
     }
 
     /**
-     * Get the processor's context set during {@link #init(FixedKeyProcessorContext) initialization}.
+     * Get the processor's {@link FixedKeyProcessorContext context} set during
+     * {@link #init(FixedKeyProcessorContext) initialization}.
      *
-     * @return the processor context; null only when called prior to {@link #init(FixedKeyProcessorContext) initialization}.
+     * @return The processor's {@link FixedKeyProcessorContext context}.
+     *         {@code null} if called prior to {@link #init(FixedKeyProcessorContext) initialization}.
      */
     protected final FixedKeyProcessorContext<KIn, VOut> context() {
         return context;

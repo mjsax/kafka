@@ -23,17 +23,15 @@ import org.apache.kafka.streams.errors.StreamsException;
 import java.util.Objects;
 
 /**
- * A data class representing an incoming record for processing in a {@link Processor}
- * or a record to forward to downstream processors via {@link ProcessorContext}.
+ * A data class representing an incoming record for processing in a {@link Processor} or a record to
+ * {@link ProcessorContext#forward(Record) forward} to downstream processors.
  *
- * This class encapsulates all the data attributes of a record: the key and value, but
- * also the timestamp of the record and any record headers.
+ * <p>This class encapsulates all the data attributes of a record: the key, value, timestamp and any headers.
  *
- * This class is immutable, though the objects referenced in the attributes of this class
- * may themselves be mutable.
+ * <p>This class is immutable, though the objects referenced in the attributes of this class may themselves be mutable.
  *
- * @param <K> The type of the key
- * @param <V> The type of the value
+ * @param <K> the type of the key
+ * @param <V> the type of the value
  */
 public class Record<K, V> {
     private final K key;
@@ -42,124 +40,147 @@ public class Record<K, V> {
     private final Headers headers;
 
     /**
-     * The full constructor, specifying all the attributes of the record.
+     * Create a new record with the provided key, value, timestamp, and headers.
      *
-     * Note: this constructor makes a copy of the headers argument.
+     * <p>Note: this constructor makes a copy of the {@code headers} argument.
      * See {@link ProcessorContext#forward(Record)} for
      * considerations around mutability of keys, values, and headers.
      *
-     * @param key The key of the record. May be null.
-     * @param value The value of the record. May be null.
-     * @param timestamp The timestamp of the record. May not be negative.
-     * @param headers The headers of the record. May be null, which will cause subsequent calls
-     *                to {@link #headers()} to return a non-null, empty, {@link Headers} collection.
-     * @throws IllegalArgumentException if the timestamp is negative.
-     * @see ProcessorContext#forward(Record)
+     * @param key
+     *        the key of the record; may be {@code null}
+     * @param value
+     *        the value of the record; may be {@code null}
+     * @param timestamp
+     *        the timestamp of the record; cannot be negative
+     * @param headers
+     *        the headers of the record; may be null, which will cause subsequent calls to {@link #headers()} to return
+     *        a not-{@code null}, empty, {@link Headers} collection
+     *
+     * @throws IllegalArgumentException
+     *         if the provide {@code timestamp} is negative.
      */
     public Record(final K key, final V value, final long timestamp, final Headers headers) {
         this.key = key;
         this.value = value;
         if (timestamp < 0) {
-            throw new StreamsException(
-                "Malformed Record",
-                new IllegalArgumentException("Timestamp may not be negative. Got: " + timestamp)
-            );
+            throw new IllegalArgumentException("Timestamp cannot be negative. Got: " + timestamp);
         }
         this.timestamp = timestamp;
         this.headers = new RecordHeaders(headers);
     }
 
     /**
-     * Convenience constructor in case you do not wish to specify any headers.
-     * Subsequent calls to {@link #headers()} will return a non-null, empty, {@link Headers} collection.
+     * See {@link #Record(Object, Object, long, Headers)}.
      *
-     * @param key The key of the record. May be null.
-     * @param value The value of the record. May be null.
-     * @param timestamp The timestamp of the record. May not be negative.
-     *
-     * @throws IllegalArgumentException if the timestamp is negative.
+     * <p>Create a new record with empty headers.
      */
     public Record(final K key, final V value, final long timestamp) {
         this(key, value, timestamp, null);
     }
 
     /**
-     * The key of the record. May be null.
+     * Return the key of the record. May be {@code null}.
+     *
+     * @return The key of the record.
      */
     public K key() {
         return key;
     }
 
     /**
-     * The value of the record. May be null.
+     * Return the value of the record. May be {@code null}.
+     *
+     * @return The value of the record.
      */
     public V value() {
         return value;
     }
 
     /**
-     * The timestamp of the record. Will never be negative.
+     * Return the timestamp of the record. Will never be negative.
+     *
+     * @return The timestamp of the record.
      */
     public long timestamp() {
         return timestamp;
     }
 
     /**
-     * The headers of the record. Never null.
+     * The headers of the record. Will never be {@code null}.
+     *
+     * @return The headers of the record.
      */
     public Headers headers() {
         return headers;
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the key.
+     * Return a "deep copy" of the record, with a new key.
      *
-     * Copies the attributes of this record with the key replaced.
+     * <p>This method makes a "deep copy" of the {@code Record} only, but does not deep copy the key, value, or headers
+     * objects.
+     * See {@link ProcessorContext#forward(Record)} for considerations around mutability of keys, values, and headers.
      *
-     * @param key The key of the result record. May be null.
-     * @param <NewK> The type of the new record's key.
-     * @return A new Record instance with all the same attributes (except that the key is replaced).
+     * @param key
+     *        the key of the result record; may be {@code null}
+     *
+     * @param <NewK> the type of the new record's key
+     *
+     * @return A new {@code Record} instance with all the same attributes (except that the key is replaced).
      */
     public <NewK> Record<NewK, V> withKey(final NewK key) {
         return new Record<>(key, value, timestamp, headers);
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the value.
+     * Return a "deep copy" of the record, with a new value.
      *
-     * Copies the attributes of this record with the value replaced.
+     * <p>This method makes a "deep copy" of the {@code Record} only, but does not deep copy the key, value, or headers
+     * objects.
+     * See {@link ProcessorContext#forward(Record)} for considerations around mutability of keys, values, and headers.
      *
-     * @param value The value of the result record.
-     * @param <NewV> The type of the new record's value.
-     * @return A new Record instance with all the same attributes (except that the value is replaced).
+     * @param value
+     *        the value of the result record; may be {@code null}
+     *
+     * @param <NewV> the type of the new record's value
+     *
+     * @return A new {@code Record} instance with all the same attributes (except that the value is replaced).
      */
     public <NewV> Record<K, NewV> withValue(final NewV value) {
         return new Record<>(key, value, timestamp, headers);
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the timestamp.
+     * Return a "deep copy" of the record, with a new timestamp.
      *
-     * Copies the attributes of this record with the timestamp replaced.
+     * <p>This method makes a "deep copy" of the {@code Record} only, but does not deep copy the key, value, or headers
+     * objects.
+     * See {@link ProcessorContext#forward(Record)} for considerations around mutability of keys, values, and headers.
      *
-     * @param timestamp The timestamp of the result record.
-     * @return A new Record instance with all the same attributes (except that the timestamp is replaced).
+     * @param timestamp
+     *        the timestamp of the result record; cannot be negative
+     *
+     * @return A new {@code Record} instance with all the same attributes (except that the timestamp is replaced).
+     *
+     * @throws IllegalArgumentException
+     *         if the provide {@code timestamp} is negative.
      */
     public Record<K, V> withTimestamp(final long timestamp) {
         return new Record<>(key, value, timestamp, headers);
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the headers.
+     * Return a "deep copy" of the record, with a new key.
      *
-     * Copies the attributes of this record with the headers replaced.
-     * Also makes a copy of the provided headers.
+     * <p>This method makes a "deep copy" of the {@code Record} only, but does not deep copy the key, value, or headers
+     * objects.
+     * See {@link ProcessorContext#forward(Record)} for considerations around mutability of keys, values, and headers.
      *
-     * See {@link ProcessorContext#forward(Record)} for
-     * considerations around mutability of keys, values, and headers.
+     * @param headers
+     *        the headers of the record; may be null, which will cause subsequent calls to {@link #headers()} to return
+     *        a not-{@code null}, empty, {@link Headers} collection
      *
-     * @param headers The headers of the result record.
-     * @return A new Record instance with all the same attributes (except that the headers are replaced).
+     * @return A new {@code Record} instance with all the same attributes (except that the headers are replaced).
      */
     public Record<K, V> withHeaders(final Headers headers) {
         return new Record<>(key, value, timestamp, headers);

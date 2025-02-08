@@ -22,27 +22,30 @@ import java.util.function.Supplier;
 
 /**
  * A processor supplier that can create one or more {@link FixedKeyProcessor} instances.
- * <p>
- * The supplier should always generate a new instance each time {@link FixedKeyProcessorSupplier#get()} gets called. Creating
- * a single {@link FixedKeyProcessor} object and returning the same object reference in {@link FixedKeyProcessorSupplier#get()} would be
- * a violation of the supplier pattern and leads to runtime exceptions.
  *
- * @param <KIn> the type of input keys
- * @param <VIn> the type of input values
- * @param <VOut> the type of output values
+ * <p>The supplier should always generate a new instance each time {@link FixedKeyProcessorSupplier#get()} gets called.
+ * Creating a single {@link FixedKeyProcessor} object and returning the same object reference in
+ * {@link FixedKeyProcessorSupplier#get()} would be a violation of the supplier pattern and leads to runtime exceptions.
+ *
+ * @param <KIn> the processor's input record key type
+ * @param <VIn> the processor's input record value type
+ * @param <VOut> the processor's output record value type
+ *
+ * @see org.apache.kafka.streams.kstream.KStream#processValues(FixedKeyProcessorSupplier, String...) KStream#processValues()
  */
 @FunctionalInterface
 public interface FixedKeyProcessorSupplier<KIn, VIn, VOut>
-    extends ConnectedStoreProvider, Supplier<FixedKeyProcessor<KIn, VIn, VOut>> {
+    extends ConnectedStoreProvider,
+            Supplier<FixedKeyProcessor<KIn, VIn, VOut>> {
 
     /**
      * Return a newly constructed {@link FixedKeyProcessor} instance.
-     * The supplier should always generate a new instance each time {@code FixedKeyProcessorSupplier#get()} gets called.
-     * <p>
-     * Creating a single {@link FixedKeyProcessor} object and returning the same object reference in {@code FixedKeyProcessorSupplier#get()}
+     * The supplier should always generate a new instance each time {@code get()} gets called.
+     *
+     * <p>Creating a single {@link FixedKeyProcessor} object and returning the same object reference in {@code #get()}
      * is a violation of the supplier pattern and leads to runtime exceptions.
      *
-     * @return a new {@link FixedKeyProcessor} instance
+     * @return A new {@link FixedKeyProcessor} instance.
      */
     FixedKeyProcessor<KIn, VIn, VOut> get();
 }

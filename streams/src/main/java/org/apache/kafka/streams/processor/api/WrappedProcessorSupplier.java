@@ -14,16 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.processor.api;
 
 /**
- * Marker interface for classes implementing {@link ProcessorSupplier}
- * that have been wrapped via a {@link ProcessorWrapper}.
- * <p>
- * To convert a {@link ProcessorSupplier} instance into a {@link WrappedProcessorSupplier},
+ * Marker interface for classes implementing {@link ProcessorSupplier} that have been wrapped via a {@link ProcessorWrapper}.
+ *
+ * <p>To convert a {@link ProcessorSupplier} instance into a {@link WrappedProcessorSupplier},
  * use the {@link ProcessorWrapper#asWrapped(ProcessorSupplier)} method
  */
-public interface WrappedProcessorSupplier<KIn, VIn, KOut, VOut> extends ProcessorSupplier<KIn, VIn, KOut, VOut> {
-
-}
+public interface WrappedProcessorSupplier<KIn, VIn, KOut, VOut> extends ProcessorSupplier<KIn, VIn, KOut, VOut> { }

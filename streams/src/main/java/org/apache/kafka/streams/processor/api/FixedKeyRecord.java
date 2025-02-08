@@ -24,17 +24,16 @@ import java.util.Objects;
 
 /**
  * A data class representing an incoming record with fixed key for processing in a {@link FixedKeyProcessor}
- * or a record to forward to downstream processors via {@link FixedKeyProcessorContext}.
+ * or a record to {@link FixedKeyProcessorContext#forward(FixedKeyRecord) forward} to downstream processors.
  *
- * This class encapsulates all the data attributes of a record: the key and value, but
- * also the timestamp of the record and any record headers.
- * Though key is not allowed to be changes.
+ * <p>This class encapsulates all the data attributes of a record: the key, value, timestamp and any headers.
+ * The key is not allowed to be changed.
  *
- * This class is immutable, though the objects referenced in the attributes of this class
- * may themselves be mutable.
+ * <p>This class is immutable, though the objects referenced in the attributes of this class may themselves be mutable.
+ * Mutating the key would be a contract violation and is not allowed.
  *
- * @param <K> The type of the fixed key
- * @param <V> The type of the value
+ * @param <K> the type of the fixed key
+ * @param <V> the type of the value
  */
 public final class FixedKeyRecord<K, V> {
 
@@ -43,10 +42,6 @@ public final class FixedKeyRecord<K, V> {
     private final long timestamp;
     private final Headers headers;
 
-    /**
-     * Package-private constructor. Users must not construct this class directly, but only
-     * modify records they were handed by the framework.
-     */
     FixedKeyRecord(final K key, final V value, final long timestamp, final Headers headers) {
         this.key = key;
         this.value = value;
@@ -61,69 +56,90 @@ public final class FixedKeyRecord<K, V> {
     }
 
     /**
-     * The key of the record. May be null.
+     * Return the key of the record. May be {@code null}.
+     *
+     * @return The key of the record.
      */
     public K key() {
         return key;
     }
 
     /**
-     * The value of the record. May be null.
+     * Return the value of the record. May be {@code null}.
+     *
+     * @return The value of the record.
      */
     public V value() {
         return value;
     }
 
     /**
-     * The timestamp of the record. Will never be negative.
+     * Return the timestamp of the record. Will never be negative.
+     *
+     * @return The timestamp of the record.
      */
     public long timestamp() {
         return timestamp;
     }
 
     /**
-     * The headers of the record. Never null.
+     * The headers of the record. Will never be {@code null}.
+     *
+     * @return The headers of the record.
      */
     public Headers headers() {
         return headers;
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the value.
+     * Return a "deep copy" of the record, with a new value.
      *
-     * Copies the attributes of this record with the value replaced.
+     * <p>This method makes a "deep copy" of the {@code FixedKeyRecord} only, but does not deep copy the key, value,
+     * or headers objects.
+     * See {@link FixedKeyProcessorContext#forward(FixedKeyRecord)} for considerations around mutability of keys,
+     * values, and headers.
      *
-     * @param value The value of the result record.
-     * @param <NewV> The type of the new record's value.
-     * @return A new Record instance with all the same attributes (except that the value is replaced).
+     * @param value
+     *        the value of the result record
+     *
+     * @param <NewV> the type of the new record's value
+     *
+     * @return A new {@code FixedKeyRecord} instance with all the same attributes (except that the value is replaced).
      */
     public <NewV> FixedKeyRecord<K, NewV> withValue(final NewV value) {
         return new FixedKeyRecord<>(key, value, timestamp, headers);
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the timestamp.
+     * Return a "deep copy" of the record, with a new timestamp.
      *
-     * Copies the attributes of this record with the timestamp replaced.
+     * <p>This method makes a "deep copy" of the {@code FixedKeyRecord} only, but does not deep copy the key, value,
+     * or headers objects.
+     * See {@link FixedKeyProcessorContext#forward(FixedKeyRecord)} for considerations around mutability of keys,
+     * values, and headers.
      *
-     * @param timestamp The timestamp of the result record.
-     * @return A new Record instance with all the same attributes (except that the timestamp is replaced).
+     * @param timestamp
+     *        the timestamp of the result record
+     *
+     * @return A new {@code FixedKeyRecord} instance with all the same attributes (except that the timestamp is replaced).
      */
     public FixedKeyRecord<K, V> withTimestamp(final long timestamp) {
         return new FixedKeyRecord<>(key, value, timestamp, headers);
     }
 
     /**
-     * A convenient way to produce a new record if you only need to change the headers.
+     * Return a "deep copy" of the record, with new headers.
      *
-     * Copies the attributes of this record with the headers replaced.
-     * Also makes a copy of the provided headers.
+     * <p>This method makes a "deep copy" of the {@code FixedKeyRecord} only, but does not deep copy the key, value,
+     * or headers objects.
+     * See {@link FixedKeyProcessorContext#forward(FixedKeyRecord)} for considerations around mutability of keys,
+     * values, and headers.
      *
-     * See {@link FixedKeyProcessorContext#forward(FixedKeyRecord)} for
-     * considerations around mutability of keys, values, and headers.
+     * @param headers
+     *        the headers of the result record; may be null, which will cause subsequent calls to {@link #headers()}
+     *        to return a not-{@code null}, empty, {@link Headers} collection.
      *
-     * @param headers The headers of the result record.
-     * @return A new Record instance with all the same attributes (except that the headers are replaced).
+     * @return A new {@code FixedKeyRecord} instance with all the same attributes (except that the headers are replaced).
      */
     public FixedKeyRecord<K, V> withHeaders(final Headers headers) {
         return new FixedKeyRecord<>(key, value, timestamp, headers);

@@ -42,6 +42,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.kafka.streams.StreamsConfig.InternalConfig.IQ_CONSISTENCY_OFFSET_VECTOR_ENABLED;
 import static org.apache.kafka.streams.internals.ApiUtils.prepareMillisCheckFailMsgPrefix;
@@ -310,6 +311,7 @@ public final class ProcessorContextImpl extends AbstractProcessorContext<Object,
         if (intervalMs < 1) {
             throw new IllegalArgumentException("The minimum supported scheduling interval is 1 millisecond.");
         }
+        Objects.requireNonNull(callback, "callback cannot be null");
         return streamTask.schedule(intervalMs, type, callback);
     }
 

@@ -23,41 +23,54 @@ import org.apache.kafka.streams.processor.StateStore;
 import java.time.Duration;
 
 /**
- * A processor of key-value pair records.
+ * A processor of key-value pair {@link Record records}.
  *
- * @param <KIn> the type of input keys
- * @param <VIn> the type of input values
- * @param <KOut> the type of output keys
- * @param <VOut> the type of output values
+ * <p>{@link Processor Processors} are created by {@link ProcessorSupplier ProcessorSuppliers} which are
+ * {@link org.apache.kafka.streams.Topology#addProcessor(String, ProcessorSupplier, String...) added} to a
+ * {@link org.apache.kafka.streams.Topology Topology}.
+ *
+ * @param <KIn> the input record key type
+ * @param <VIn> the input record value type
+ * @param <KOut> the output record key type
+ * @param <VOut> the output record key type
+ *
+ * @see ContextualProcessor
+ * @see FixedKeyProcessor
+ * @see org.apache.kafka.streams.kstream.KStream#process(ProcessorSupplier, String...) KStream#process(...)
  */
 public interface Processor<KIn, VIn, KOut, VOut> {
 
     /**
-     * Initialize this processor with the given context. The framework ensures this is called once per processor when the topology
-     * that contains it is initialized. When the framework is done with the processor, {@link #close()} will be called on it; the
-     * framework may later re-use the processor by calling {@code #init()} again.
-     * <p>
-     * The provided {@link ProcessorContext context} can be used to access topology and record meta data, to
-     * {@link ProcessorContext#schedule(Duration, PunctuationType, Punctuator) schedule} a method to be
-     * {@link Punctuator#punctuate(long) called periodically} and to access attached {@link StateStore}s.
+     * Initialize this processor with the given context.
+     * Kafka Streams ensures this method is called once per processor instance during topology initialization.
+     * When Kafka Streams is done with the processor, {@link #close()} will be called.
+     * Kafka Streams may later re-use the processor by calling {@code #init()} again.
      *
-     * @param context the context; may not be null
+     * <p>The provided context is mainly used to {@link ProcessorContext#forward(Record) forward} output records within
+     * {@link #process(Record) process()} or {@link Punctuator#punctuate(long) punctuations}, and provides access
+     * to {@link StateStore StateStores} and metadata.
+     *
+     * @param context the {@link ProcessorContext context} for this processor
      */
     default void init(final ProcessorContext<KOut, VOut> context) {}
 
     /**
-     * Process the record. Note that record metadata is undefined in cases such as a forward call from a punctuator.
+     * Process a record.
+     *
+     * <p>Note that {@link ProcessorContext#recordMetadata() record metadata} is undefined in cases such as a
+     * {@link ProcessorContext#forward(Record) forward()} call from a {@link Punctuator#punctuate(long) punctuator}.
      *
      * @param record the record to process
      */
     void process(Record<KIn, VIn> record);
 
     /**
-     * Close this processor and clean up any resources. Be aware that {@code #close()} is called after an internal cleanup.
-     * Thus, it is not possible to write anything to Kafka as underlying clients are already closed. The framework may
-     * later re-use this processor by calling {@code #init()} on it again.
-     * <p>
-     * Note: Do not close any streams managed resources, like {@link StateStore}s here, as they are managed by the library.
+     * Close this processor and clean up any resources.
+     * Be aware that {@code #close()} is called after an internal cleanup.
+     * Thus, it is not possible to write anything to Kafka as underlying clients are already closed.
+     * Kafka Streams may later re-use this processor by calling {@code #init()} again.
+     *
+     * <p>Note: Do not close any managed resources like {@link StateStore StateStores}.
      */
     default void close() {}
 }

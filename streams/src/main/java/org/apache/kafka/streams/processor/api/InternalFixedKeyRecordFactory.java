@@ -16,18 +16,16 @@
  */
 package org.apache.kafka.streams.processor.api;
 
+/**
+ * Kafka Streams internal class. <strong>Should not be used by user code.</strong>
+ */
 public final class InternalFixedKeyRecordFactory {
 
-    private InternalFixedKeyRecordFactory() {
-    }
+    private InternalFixedKeyRecordFactory() { }
 
     /**
-     * Only allowed way to create {@link FixedKeyRecord}s.
-     * <p/>
-     * DO NOT USE THIS FACTORY OUTSIDE THE FRAMEWORK.
-     * This could produce undesired results by not partitioning record properly.
-     *
-     * @see FixedKeyProcessor
+     * <p><strong>User code should not user this method.</strong>
+     * Could produce undesired results by not partitioning record properly, leading to incorrect results.
      */
     public static <KIn, VIn> FixedKeyRecord<KIn, VIn> create(final Record<KIn, VIn> record) {
         return new FixedKeyRecord<>(

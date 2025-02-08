@@ -14,16 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.processor.api;
 
 /**
- * Marker interface for classes implementing {@link FixedKeyProcessorSupplier}
- * that have been wrapped via a {@link ProcessorWrapper}.
- * <p>
- * To convert a {@link FixedKeyProcessorSupplier} instance into a {@link WrappedFixedKeyProcessorSupplier},
- * use the {@link ProcessorWrapper#asWrappedFixedKey(FixedKeyProcessorSupplier)} method
+ * Marker interface for classes implementing {@link FixedKeyProcessorSupplier} that have been wrapped via a {@link ProcessorWrapper}.
+ *
+ * <p>To convert a {@link FixedKeyProcessorSupplier} instance into a {@link WrappedFixedKeyProcessorSupplier},
+ * use the {@link ProcessorWrapper#asWrappedFixedKey(FixedKeyProcessorSupplier)} method.
  */
-public interface WrappedFixedKeyProcessorSupplier<KIn, VIn, VOut> extends FixedKeyProcessorSupplier<KIn, VIn, VOut> {
-
-}
+public interface WrappedFixedKeyProcessorSupplier<KIn, VIn, VOut> extends FixedKeyProcessorSupplier<KIn, VIn, VOut> { }

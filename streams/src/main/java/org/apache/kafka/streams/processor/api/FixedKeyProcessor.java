@@ -23,40 +23,60 @@ import org.apache.kafka.streams.processor.StateStore;
 import java.time.Duration;
 
 /**
- * A processor of key-value pair records where keys are immutable.
+ * A processor of key-value pair {@link Record records} where the key is immutable.
+ * If you need to modify the key, use {@link Processor} instead.
  *
+ * <p>{@link FixedKeyProcessor FixedKeyProcessors} are created by
+ * {@link FixedKeyProcessorSupplier FixedKeyProcessorSuppliers} which are
+ * {@link org.apache.kafka.streams.kstream.KStream#processValues(FixedKeyProcessorSupplier, String...) added} to a
+ * Kafka Streams DSL program.
+ *
+ * <p>This interface is not intended to be implemented by user code.
+
  * @param <KIn> the type of input keys
  * @param <VIn> the type of input values
  * @param <VOut> the type of output values
+ *
+ * @see ContextualFixedKeyProcessor
  */
 public interface FixedKeyProcessor<KIn, VIn, VOut> {
 
     /**
-     * Initialize this processor with the given context. The framework ensures this is called once per processor when the topology
-     * that contains it is initialized. When the framework is done with the processor, {@link #close()} will be called on it; the
-     * framework may later re-use the processor by calling {@code #init()} again.
-     * <p>
-     * The provided {@link FixedKeyProcessorContext context} can be used to access topology and record metadata, to
-     * {@link FixedKeyProcessorContext#schedule(Duration, PunctuationType, Punctuator) schedule} a method to be
-     * {@link Punctuator#punctuate(long) called periodically} and to access attached {@link StateStore}s.
+     * Initialize this processor with the given context.
+     * Kafka Streams ensures this method is called once per processor instance during topology initialization.
+     * When Kafka Streams is done with the processor, {@link #close()} will be called.
+     * Kafka Streams may later re-use the processor by calling {@code #init()} again.
      *
-     * @param context the context; may not be null
+     * <p>The provided context is mainly used to {@link FixedKeyProcessorContext#forward(FixedKeyRecord) forward}
+     * output records within {@link #process(FixedKeyRecord) process()}, and provides access to
+     * {@link StateStore StateStores} and metadata.
+     *
+     * <p>Note that calling {@link FixedKeyProcessorContext#forward(FixedKeyRecord) forward()} from a
+     * {@link Punctuator#punctuate(long) Punctuator} is not supported, as it cannot guarantee that a "correct" key is
+     * set on the output record.
+     *
+     * @param context the {@link FixedKeyProcessorContext context} for this processor
      */
     default void init(final FixedKeyProcessorContext<KIn, VOut> context) {}
 
     /**
-     * Process the record. Note that record metadata is undefined in cases such as a forward call from a punctuator.
+     * Process a record.
+     *
+     * <p>Note that {@link FixedKeyProcessorContext#recordMetadata() record metadata} is undefined in cases such as a
+     * {@link FixedKeyProcessorContext#forward(FixedKeyRecord) forward()} call from a
+     * {@link Punctuator#punctuate(long) punctuator}.
      *
      * @param record the record to process
      */
     void process(FixedKeyRecord<KIn, VIn> record);
 
     /**
-     * Close this processor and clean up any resources. Be aware that {@code #close()} is called after an internal cleanup.
-     * Thus, it is not possible to write anything to Kafka as underlying clients are already closed. The framework may
-     * later re-use this processor by calling {@code #init()} on it again.
-     * <p>
-     * Note: Do not close any streams managed resources, like {@link StateStore}s here, as they are managed by the library.
+     * Close this processor and clean up any resources.
+     * Be aware that {@code #close()} is called after an internal cleanup. Thus, it is not possible to write anything
+     * to Kafka as underlying clients are already closed.
+     * Kafka Streams may later re-use this processor by calling {@code #init()} again.
+     *
+     * <p>Note: Do not close any managed resources like {@link StateStore StateStores}.
      */
     default void close() {}
 }

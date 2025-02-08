@@ -23,31 +23,32 @@ import java.util.function.Supplier;
 
 /**
  * A processor supplier that can create one or more {@link Processor} instances.
- * <p>
- * It is used in {@link Topology} for adding new processor operators, whose generated
- * topology can then be replicated (and thus creating one or more {@link Processor} instances)
- * and distributed to multiple stream threads.
  *
- * The supplier should always generate a new instance each time {@link ProcessorSupplier#get()} gets called. Creating
- * a single {@link Processor} object and returning the same object reference in {@link ProcessorSupplier#get()} would be
- * a violation of the supplier pattern and leads to runtime exceptions.
+ * <p>The supplier should always generate a new instance each time {@link ProcessorSupplier#get()} gets called.
+ * Creating a single {@link Processor} object and returning the same object reference in {@link ProcessorSupplier#get()}
+ * would be a violation of the supplier pattern and leads to runtime exceptions.
  *
- * @param <KIn> the type of input keys
- * @param <VIn> the type of input values
- * @param <KOut> the type of output keys
- * @param <VOut> the type of output values
+ * @param <KIn> the processor's input record key type
+ * @param <VIn> the processor's input record value type
+ * @param <KOut> the processor's output record key type
+ * @param <VOut> the processor's output record value type
+ *
+ * @see Topology#addProcessor(String, ProcessorSupplier, String...) Topology#addProcessor()
+ * @see org.apache.kafka.streams.kstream.KStream#process(ProcessorSupplier, String...) KStream#process()
  */
 @FunctionalInterface
-public interface ProcessorSupplier<KIn, VIn, KOut, VOut> extends ConnectedStoreProvider, Supplier<Processor<KIn, VIn, KOut, VOut>> {
+public interface ProcessorSupplier<KIn, VIn, KOut, VOut>
+    extends ConnectedStoreProvider,
+            Supplier<Processor<KIn, VIn, KOut, VOut>> {
 
     /**
      * Return a newly constructed {@link Processor} instance.
-     * The supplier should always generate a new instance each time {@link  ProcessorSupplier#get()} gets called.
-     * <p>
-     * Creating a single {@link Processor} object and returning the same object reference in {@link ProcessorSupplier#get()}
-     * is a violation of the supplier pattern and leads to runtime exceptions.
+     * The supplier should always generate a new instance each time {@code get()} gets called.
      *
-     * @return a new {@link Processor} instance
+     * <p>Creating a single {@link Processor} object and returning the same object reference in {@code get()} is a
+     * violation of the supplier pattern and leads to runtime exceptions.
+     *
+     * @return A new {@link Processor} instance.
      */
     Processor<KIn, VIn, KOut, VOut> get();
 }

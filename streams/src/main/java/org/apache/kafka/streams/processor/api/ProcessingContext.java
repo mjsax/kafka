@@ -36,117 +36,145 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Processor context interface.
+ * Top level context interface for {@link Processor Processors} and {@link FixedKeyProcessor FixedKeyProcessors}.
+ *
+ * <p>This interface allows to access {@link Topology#connectProcessorAndStateStores(String, String...) connected}
+ * {@link StateStore state stores} (also cf. {@link StreamsBuilder#addStateStore(StoreBuilder)}), schedule
+ * {@link Punctuator punctuations}, access to topology, runtime, and {@link RecordMetadata record metadata},
+ * and to <em>request</emp> offset commits.
+ *
+ * <p>This interface is not intended to be implemented by user code.
  */
 public interface ProcessingContext {
 
     /**
-     * Return the application id.
+     * Return the {@link org.apache.kafka.streams.StreamsConfig#APPLICATION_ID_CONFIG application.id}.
      *
-     * @return the application id
+     * @return The {@code application.id}.
      */
     String applicationId();
 
     /**
      * Return the task id.
      *
-     * @return the task id
+     * @return The task id.
      */
     TaskId taskId();
 
     /**
-     * Return the metadata of the current record if available. Processors may be invoked to
-     * process a source record from an input topic, to run a scheduled punctuation
-     * (see {@link ProcessingContext#schedule(Duration, PunctuationType, Punctuator)}),
-     * or because a parent processor called {@code forward(Record)}.
-     * <p>
-     * In the case of a punctuation, there is no source record, so this metadata would be
-     * undefined. Note that when a punctuator invokes {@code forward(Record)},
-     * downstream processors will receive the forwarded record as a regular
-     * {@link Processor#process(Record)} or {@link FixedKeyProcessor#process(FixedKeyRecord)} invocation.
-     * In other words, it wouldn't be apparent to
-     * downstream processors whether the record being processed came from an input topic
-     * or punctuation and therefore whether this metadata is defined. This is why
-     * the return type of this method is {@link Optional}.
-     * <p>
-     * If there is any possibility of punctuators upstream, any access
-     * to this field should consider the case of
-     * "<code>recordMetadata().isPresent() == false</code>".
+     * Return the {@link RecordMetadata metadata} of the current record if available.
+     * Processors may be invoked to process a source record from an input topic, to run
+     * {@link ProcessingContext#schedule(Duration, PunctuationType, Punctuator) scheduled punctuation},
+     * or because a parent processor called {@link ProcessorContext#forward(Record) forward()}.
+     *
+     * <p>In the case of a punctuation, there is no source record and this metadata is undefined, and thus not available.
+     * Note that when a punctuator invokes {@link ProcessorContext#forward(Record) forward()}, downstream processors
+     * will receive the forwarded record as a regular {@link Processor#process(Record)} or
+     * {@link FixedKeyProcessor#process(FixedKeyRecord)} invocation.
+     * In other words, it wouldn't be apparent to downstream processors whether the record being processed came from an
+     * input topic or punctuation and therefore whether this metadata is defined.
+     * This is why the return type of this method is {@link Optional}.
+     *
+     * <p>If there is any possibility of punctuators upstream, any access to this field should consider the case of
+     * <code>recordMetadata().isPresent() == false</code>.
      * Of course, it would be safest to always guard this condition.
+     *
+     * @return The {@link RecordMetadata metadata} of the current record if available.
      */
     Optional<RecordMetadata> recordMetadata();
 
     /**
-     * Return the default key serde.
+     * Return the {@link org.apache.kafka.streams.StreamsConfig#DEFAULT_KEY_SERDE_CLASS_CONFIG default.key.serde}.
      *
-     * @return the key serializer
+     * @return The default key serde.
      */
     Serde<?> keySerde();
 
     /**
-     * Return the default value serde.
+     * Return the {@link org.apache.kafka.streams.StreamsConfig#DEFAULT_VALUE_SERDE_CLASS_CONFIG default.value.serde}.
      *
-     * @return the value serializer
+     * @return The default value serde.
      */
     Serde<?> valueSerde();
 
     /**
-     * Return the state directory for the partition.
+     * Return the state directory of the task, i.e, {@code /<state.dir>/<task.id>/}.
      *
-     * @return the state directory
+     * @return The task's state directory.
      */
     File stateDir();
 
     /**
-     * Return Metrics instance.
+     * Return the {@link StreamsMetrics} instance.
      *
-     * @return StreamsMetrics
+     * <p>The {@link StreamsMetrics} instance allows to add custom sensors and record custom metrics.
+     *
+     * <p><strong>Caution:</strong> Do not remove any metrics added by the Kafka Streams runtime via this interface,
+     * as it could lead to runtime exceptions.
+     *
+     * @return {@link StreamsMetrics} instance.
      */
     StreamsMetrics metrics();
 
     /**
-     * Get the state store given the store name.
+     * Get a {@link StateStore} given the store name.
+     * "Regular" state stores are sharded and a {@link Processor}/{@link FixedKeyProcessor} instance has only access
+     * to a single shard of the state store.
      *
-     * @param name The store name
-     * @param <S> The type or interface of the store to return
-     * @return The state store instance
+     * <p>{@link Topology#addStateStore(StoreBuilder, String...) State stores}
+     * (also cf. {@link org.apache.kafka.streams.processor.ConnectedStoreProvider} and
+     * {@link StreamsBuilder#addStateStore(StoreBuilder) StreamsBuilder#addStateStore()}) and
+     * {@link Topology#addReadOnlyStateStore(StoreBuilder, String, Deserializer, Deserializer, String, String, ProcessorSupplier) read-only state stores}
+     * must be {@link Topology#connectProcessorAndStateStores(String, String...) connected} to the processor when the
+     * topology is specified, to make them accessible.
+     * All {@link Topology#addGlobalStore(StoreBuilder, String, Deserializer, Deserializer, String, String, ProcessorSupplier) global state stores}
+     * and {@link StreamsBuilder#globalTable(String) global tables} are accessible from any processor automatically.
      *
-     * @throws ClassCastException if the return type isn't a type or interface of the actual returned store.
+     * @param name
+     *        the state store name
+     *
+     * @return The state store instance, which needs to be type-casted to the actual {@link StateStore} type.
      */
     <S extends StateStore> S getStateStore(final String name);
 
     /**
-     * Schedule a periodic operation for processors. A processor may call this method during
-     * {@link Processor#init(ProcessorContext) initialization},
-     * {@link Processor#process(Record) processing},
-     * {@link FixedKeyProcessor#init(FixedKeyProcessorContext) initialization}, or
-     * {@link FixedKeyProcessor#process(FixedKeyRecord) processing} to
-     * schedule a periodic callback &mdash; called a punctuation &mdash; to {@link Punctuator#punctuate(long)}.
+     * Schedule a periodic operation for processors.
+     * A processor may call this method during initialization
+     * ({@link Processor#init(ProcessorContext) Processor#init()}/{@link FixedKeyProcessor#init(FixedKeyProcessorContext) FixedKeyProcessor#init()},
+     * or during processing
+     * ({@link Processor#process(Record) Processor#process()}/{@link FixedKeyProcessor#process(FixedKeyRecord) FixedKeyProcessor#process()})
+     * to schedule a periodic callback&mdash;called a punctuation&mdash;to {@link Punctuator#punctuate(long)}.
      * The type parameter controls what notion of time is used for punctuation:
      * <ul>
-     *   <li>{@link PunctuationType#STREAM_TIME} &mdash; uses "stream time", which is advanced by the processing of messages
-     *   in accordance with the timestamp as extracted by the {@link TimestampExtractor} in use.
-     *   The first punctuation will be triggered by the first record that is processed.
-     *   <b>NOTE:</b> Only advanced if messages arrive</li>
-     *   <li>{@link PunctuationType#WALL_CLOCK_TIME} &mdash; uses system time (the wall-clock time),
-     *   which is advanced independent of whether new messages arrive.
-     *   The first punctuation will be triggered after interval has elapsed.
-     *   <b>NOTE:</b> This is best effort only as its granularity is limited by how long an iteration of the
-     *   processing loop takes to complete</li>
+     *   <li>{@link PunctuationType#STREAM_TIME STREAM_TIME}&mdash;use stream-time, which is advanced by the
+     *       processing of record in accordance with the timestamp as extracted by the {@link TimestampExtractor} in use.
+     *       The first punctuation will be triggered by the first record that is processed.
+     *       <b>NOTE:</b> stream-time only advanced if record are processed.</li>
+     *   <li>{@link PunctuationType#WALL_CLOCK_TIME WALL_CLOCK_TIME}&mdash;uses system time (also called wall-clock time),
+     *       which advances independent of whether new record arrive.
+     *       The first punctuation will be triggered after the specified interval has elapsed.</li>
      * </ul>
+     * <strong>NOTE:</strong> Punctuation schedules are executed as best effort only, as its granularity is limited by how long
+     * an iteration of the internal processing loop takes to complete.
      *
-     * <b>Skipping punctuations:</b> Punctuations will not be triggered more than once at any given timestamp.
+     * <p><strong>Skipping punctuations:</strong> Punctuations will not be triggered more than once at any given
+     * timestamp.
      * This means that "missed" punctuation will be skipped.
      * It's possible to "miss" a punctuation if:
      * <ul>
-     *   <li>with {@link PunctuationType#STREAM_TIME}, when stream time advances more than interval</li>
-     *   <li>with {@link PunctuationType#WALL_CLOCK_TIME}, on GC pause, too short interval, ...</li>
+     *   <li>{@link PunctuationType#STREAM_TIME STREAM_TIME}: when stream-time advances (skips ahead) more than the interval</li>
+     *   <li>{@link PunctuationType#WALL_CLOCK_TIME WALL_CLOCK_TIME}: on GC pause, too short interval, ...</li>
      * </ul>
      *
-     * @param interval the time interval between punctuations (supported minimum is 1 millisecond)
-     * @param type one of: {@link PunctuationType#STREAM_TIME}, {@link PunctuationType#WALL_CLOCK_TIME}
-     * @param callback a function consuming timestamps representing the current stream or system time
-     * @return a handle allowing cancellation of the punctuation schedule established by this method
+     * @param interval
+     *        the time interval (cannot be {@code null}) between punctuations (supported minimum is 1 millisecond)
+     * @param type
+     *        one of: {@link PunctuationType#STREAM_TIME STREAM_TIME}, {@link PunctuationType#WALL_CLOCK_TIME WALL_CLOCK_TIME}; (cannot be {@code null})
+     * @param callback
+     *        the function (cannot be {@code null}) which will be executed each time a punctuation is triggered
+     *
+     * @return A handle allowing cancellation of the punctuation schedule established by this method.
+     *
      * @throws IllegalArgumentException if the interval is not representable in milliseconds
      */
     Cancellable schedule(final Duration interval,
@@ -154,36 +182,42 @@ public interface ProcessingContext {
                          final Punctuator callback);
 
     /**
-     * Request a commit. Note that calling {@code commit()} is only a request for a commit, but it does not execute one.
-     * Hence, when {@code commit()} returns, no commit was executed yet. However, Kafka Streams will commit as soon
-     * as possible, instead of waiting for next {@code commit.interval.ms} to pass.
+     * Request a commit.
+     *
+     * <p>Note that calling {@code commit()} is only a request for a commit, but it does not execute one.
+     * Hence, when {@code commit()} returns, no commit was executed yet.
+     * However, Kafka Streams will commit as soon as possible, instead of waiting for next
+     * {@link org.apache.kafka.streams.StreamsConfig#COMMIT_INTERVAL_MS_CONFIG commit.interval.ms} to pass.
      */
     void commit();
 
     /**
-     * Returns all the application config properties as key/value pairs.
+     * Return the application {@link org.apache.kafka.streams.StreamsConfig properties} as key/value pairs.
      *
-     * <p> The config properties are defined in the {@link org.apache.kafka.streams.StreamsConfig}
-     * object and associated to the ProcessorContext.
-     *
-     * <p> The type of the values is dependent on the {@link org.apache.kafka.common.config.ConfigDef.Type type} of the property
-     * (e.g. the value of {@link org.apache.kafka.streams.StreamsConfig#DEFAULT_KEY_SERDE_CLASS_CONFIG DEFAULT_KEY_SERDE_CLASS_CONFIG}
-     * will be of type {@link Class}, even if it was specified as a String to
+     * <p>The type of the values is dependent on the {@link org.apache.kafka.common.config.ConfigDef.Type type} of the
+     * property (e.g., the value of
+     * {@link org.apache.kafka.streams.StreamsConfig#DEFAULT_KEY_SERDE_CLASS_CONFIG DEFAULT_KEY_SERDE_CLASS_CONFIG}
+     * is {@link Class}, even if it was specified as a {@link String} via
      * {@link org.apache.kafka.streams.StreamsConfig#StreamsConfig(Map) StreamsConfig(Map)}).
      *
-     * @return all the key/values from the StreamsConfig properties
+     * @return All the key/values from the {@link org.apache.kafka.streams.StreamsConfig StreamsConfig} properties.
      */
     Map<String, Object> appConfigs();
 
     /**
-     * Return all the application config properties with the given key prefix, as key/value pairs
-     * stripping the prefix.
+     * Return all the application {@link org.apache.kafka.streams.StreamsConfig} properties
+     * which start with the given key prefix, as key/value pairs stripping by the prefix.
      *
-     * <p> The config properties are defined in the {@link org.apache.kafka.streams.StreamsConfig}
-     * object and associated to the ProcessorContext.
+     * <p>For example, {@code appConfigsWithPrefix("default.")} will return all the properties that start with
+     * {@code default.}, such as {@code default.key.serde}, {@code default.value.serde}, etc.
+     * striped by the {@code default.} prefix.
+     * If the prefix matches the key fullys, the key/value pair will not be included in the result.
      *
-     * @param prefix the properties prefix
-     * @return the key/values matching the given prefix from the StreamsConfig properties.
+     * @param prefix
+     *        the properties prefix used to filter the properties
+     *
+     * @return All the key/values matching the given prefix from the
+     *         {@link org.apache.kafka.streams.StreamsConfig StreamsConfig} properties.
      */
     Map<String, Object> appConfigsWithPrefix(final String prefix);
 
@@ -191,26 +225,32 @@ public interface ProcessingContext {
      * Return the current system timestamp (also called wall-clock time) in milliseconds.
      *
      * <p> Note: this method returns the internally cached system timestamp from the Kafka Stream runtime.
-     * Thus, it may return a different value compared to {@code System.currentTimeMillis()}.
+     * Thus, it may return a different value compared to {@link System#currentTimeMillis()}.
      *
-     * @return the current system timestamp in milliseconds
+     * <p>It is recommended to use this method instead of {@link System#currentTimeMillis()} to avoid expensive
+     * system calls.
+     *
+     * @return The current system timestamp in milliseconds.
      */
     long currentSystemTimeMs();
 
     /**
      * Return the current stream-time in milliseconds.
      *
-     * <p> Stream-time is the maximum observed {@link TimestampExtractor record timestamp} so far
+     * <p>Stream-time is the maximum observed {@link TimestampExtractor record timestamp} so far
      * (including the currently processed record), i.e., it can be considered a high-watermark.
      * Stream-time is tracked on a per-task basis and is preserved across restarts and during task migration.
      *
-     * <p> Note: this method is not supported for global processors (cf.
-     * {@link Topology#addGlobalStore(StoreBuilder, String, TimestampExtractor, Deserializer, Deserializer, String, String, ProcessorSupplier) Topology#addGlobalStore(...)}
-     * and {@link StreamsBuilder#addGlobalStore(StoreBuilder, String, Consumed, ProcessorSupplier) StreamsBuilder.addGlobalStore(...)}),
+     * <p>Note: this method is not supported for
+     * {@link Topology#addGlobalStore(StoreBuilder, String, TimestampExtractor, Deserializer, Deserializer, String, String, ProcessorSupplier) global processors}
+     * (also cf. {@link StreamsBuilder#addGlobalStore(StoreBuilder, String, Consumed, ProcessorSupplier) StreamsBuilder.addGlobalStore(...)}),
      * because there is no concept of stream-time for this case.
      * Calling this method in a global processor will result in an {@link UnsupportedOperationException}.
      *
-     * @return the current stream-time in milliseconds
+     * @return The current stream-time in milliseconds.
+     *
+     * @throws UnsupportedOperationException
+     *         if the method is called inside a global processor
      */
     long currentStreamTimeMs();
 }
