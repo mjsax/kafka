@@ -21,10 +21,11 @@ import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 
 /**
- * Sets the {@code auto.offset.reset} configuration when
+ * Sets the {@code auto.offset.reset} configuration for specific topic(s) when
  * {@link Topology#addSource(AutoOffsetReset, String, String...) adding a source processor}
  * or when creating {@link KStream} or {@link KTable} via {@link StreamsBuilder}.
  */
@@ -42,39 +43,50 @@ public class AutoOffsetReset {
     }
 
     /**
-     * Creates an {@code AutoOffsetReset} instance representing "none".
+     * Creates an {@code AutoOffsetReset} instance representing {@code "none"} reset policy.
      *
      * @return An {@link AutoOffsetReset} instance for no reset.
      */
+    @SuppressWarnings("unused")
     public static AutoOffsetReset none() {
         return new AutoOffsetReset(StrategyType.NONE, Optional.empty());
     }
 
     /**
-     * Creates an {@code AutoOffsetReset} instance representing "earliest".
+     * Creates an {@code AutoOffsetReset} instance representing {@code "earliest"} reset policy.
      *
      * @return An {@link AutoOffsetReset} instance for the "earliest" offset.
      */
+    @SuppressWarnings("unused")
     public static AutoOffsetReset earliest() {
         return new AutoOffsetReset(StrategyType.EARLIEST, Optional.empty());
     }
 
     /**
-     * Creates an {@code AutoOffsetReset} instance representing "latest".
+     * Creates an {@code AutoOffsetReset} instance representing {@code "latest"} reset policy.
      * 
      * @return An {@code AutoOffsetReset} instance for the "latest" offset.
      */
+    @SuppressWarnings("unused")
     public static AutoOffsetReset latest() {
         return new AutoOffsetReset(StrategyType.LATEST, Optional.empty());
     }
 
     /**
      * Creates an {@code AutoOffsetReset} instance for the specified reset duration.
-     * 
-     * @param duration The duration to use for the offset reset; must be non-negative.
+     *
+     * <p>Offset will be reset to {@code System.currentTimeMillis() - durationMs}, using
+     * {@link org.apache.kafka.clients.consumer.KafkaConsumer#offsetsForTimes(Map) KafkaConsumer#offsetsForTimes(...)}.
+     *
+     * @param duration
+     *        the duration to use for the offset reset; must be non-negative
+     *
      * @return An {@code AutoOffsetReset} instance with the specified duration.
-     * @throws IllegalArgumentException If the duration is negative.
+     *
+     * @throws IllegalArgumentException
+     *         if the duration is negative
      */
+    @SuppressWarnings("unused")
     public static AutoOffsetReset byDuration(final Duration duration) {
         if (duration.isNegative()) {
             throw new IllegalArgumentException("Duration cannot be negative");

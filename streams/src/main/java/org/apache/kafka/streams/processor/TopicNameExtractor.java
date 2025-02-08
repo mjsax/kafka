@@ -17,18 +17,27 @@
 package org.apache.kafka.streams.processor;
 
 /**
- * An interface that allows to dynamically determine the name of the Kafka topic to send at the sink node of the topology.
+ * An interface that allows to dynamically compute the name of a Kafka topic a
+ * {@link org.apache.kafka.streams.Topology#addSink(String, TopicNameExtractor, String...) sink node} writes into.
+ *
+ * @param <K> the record key type
+ * @param <V> the record value type
  */
 public interface TopicNameExtractor<K, V> {
 
     /**
-     * Extracts the topic name to send to. The topic name must already exist, since the Kafka Streams library will not
-     * try to automatically create the topic with the extracted name.
+     * Extracts the topic name to write a record into.
+     * The topic must already exist, since Kafka Streams will not create the topic.
+     * Returning {@code null} as topic name is invalid and will result in a runtime exception.
      *
-     * @param key           the record key
-     * @param value         the record value
-     * @param recordContext current context metadata of the record
-     * @return              the topic name this record should be sent to
+     * @param key
+     *        the record key
+     * @param value
+     *        the record value
+     * @param recordContext
+     *        current context metadata of the record
+     *
+     * @return The topic name (cannot be {@code null}) this record should be writen into.
      */
     String extract(final K key, final V value, final RecordContext recordContext);
 }

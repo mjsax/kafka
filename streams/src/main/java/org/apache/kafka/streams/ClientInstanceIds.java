@@ -26,27 +26,28 @@ import java.util.Map;
  */
 public interface ClientInstanceIds {
     /**
-     * Returns the {@code client instance id} of the admin client.
+     * Return the {@code client instance id} of the admin client.
      *
-     * @return the {@code client instance id} of the admin client
+     * @return The {@code client instance id} of the admin client.
      *
-     * @throws IllegalStateException If telemetry is disabled on the admin client.
+     * @throws IllegalStateException
+     *         if telemetry is disabled on the admin client
      */
     @SuppressWarnings("unused")
     Uuid adminInstanceId();
 
     /**
-     * Returns the {@code client instance id} of the consumers.
+     * Return the {@code client instance ids} of all consumers.
      *
-     * @return a map from thread key to {@code client instance id}
+     * @return A map from "consumer ID" to {@code client instance id}.
      */
     @SuppressWarnings("unused")
     Map<String, Uuid> consumerInstanceIds();
 
     /**
-     * Returns the {@code client instance id} of the producers.
+     * Return the {@code client instance id} of all producers.
      *
-     * @return a map from thread key to {@code client instance id}
+     * @return A map from "producer ID" to {@code client instance id}.
      */
     @SuppressWarnings("unused")
     Map<String, Uuid> producerInstanceIds();

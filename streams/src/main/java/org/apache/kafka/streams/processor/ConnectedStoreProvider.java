@@ -20,84 +20,65 @@ import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.processor.api.FixedKeyProcessorSupplier;
+import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.state.StoreBuilder;
 
 import java.util.Set;
 
 /**
- * Provides a set of {@link StoreBuilder}s that will be automatically added to the topology and connected to the
- * associated processor.
- * <p>
- * Implementing this interface is recommended when the associated processor wants to encapsulate its usage of its state
- * stores, rather than exposing them to the user building the topology.
- * <p>
- * In the event that separate but related processors may want to share the same store, different {@link ConnectedStoreProvider}s
- * may provide the same instance of {@link StoreBuilder}, as shown below.
+ * Allows to implicitly {@link Topology#addStateStore(StoreBuilder, String...) add} {@link StateStore state stores} to
+ * a {@link Topology} and automatically {@link Topology#connectProcessorAndStateStores(String, String...) connect} them
+ * to the corresponding {@link Topology#addProcessor(String, ProcessorSupplier, String...) processor}.
+ *
+ * <p>Using this interface is recommended when the associated processor wants to encapsulate its usage of its
+ * {@link StateStore state stores}, rather than exposing them to the user building the topology.
+ * If different processors want to share the same {@link StateStore}, this interface should not be used, but
+ * {@link StateStore state stores} should be {@link Topology#addStateStore(StoreBuilder, String...) added expliclity}
+ * to the {@link Topology}
+ * (also cf. {@link org.apache.kafka.streams.StreamsBuilder#addStateStore(StoreBuilder) StreamsBuilder#addStateStore(...)}).
+ *
+ * <p>When a {@link Topology#addProcessor(String, ProcessorSupplier, String...) processor} is added to a topology,
+ * and the {@link ProcessorSupplier} (or {@link FixedKeyProcessorSupplier}) overwrites the {@link #stores()} method,
+ * for each returned {@link StoreBuilder}, a corresponding {@link StateStore} will be added to the topology with
+ * store name {@link StoreBuilder#name()}, and connected to the processor:
+ *
  * <pre>{@code
- * class StateSharingProcessors {
- *     StoreBuilder<KeyValueStore<String, String>> storeBuilder =
- *         Stores.keyValueStoreBuilder(Stores.persistentKeyValueStore("myStore"), Serdes.String(), Serdes.String());
+ * public class MyProcessorSupplier implements ProcessorSupplier<String, Integer, String, Integer>, ConnectedStoreProvider {
  *
- *     class SupplierA implements ProcessorSupplier<String, Integer> {
- *         Processor<String, Integer> get() {
- *             return new Processor() {
- *                 private StateStore store;
+ *   @Override
+ *   Processor<KIn, VIn, KOut, VOut> get() {
+ *     return new Processor<>() {
+ *       private KeyValueStore<String, String> store;
  *
- *                 void init(ProcessorContext context) {
- *                     this.store = context.getStateStore("myStore");
- *                 }
+ *       @Override
+ *       public void init(final ProcessorContext<String, Integer> context) {
+ *         // Processor can access the provided store
+ *         store = context.getStateStore("myStore");
+ *        }
  *
- *                 void process(String key, Integer value) {
- *                     // can access this.store
- *                 }
+ *       @Override
+ *       public void process(final Record<String, Integer> record) {
+ *         ...
+ *       }
+ *     };
+ *   }
  *
- *                 void close() {
- *                     // can access this.store
- *                 }
- *             }
- *         }
- *
- *         Set<StoreBuilder<?>> stores() {
- *             return Collections.singleton(storeBuilder);
- *         }
- *     }
- *
- *     class SupplierB implements ProcessorSupplier<String, String> {
- *         Processor<String, String> get() {
- *             return new Processor() {
- *                 private StateStore store;
- *
- *                 void init(ProcessorContext context) {
- *                     this.store = context.getStateStore("myStore");
- *                 }
- *
- *                 void process(String key, String value) {
- *                     // can access this.store
- *                 }
- *
- *                 void close() {
- *                     // can access this.store
- *                 }
- *             }
- *         }
- *
- *         Set<StoreBuilder<?>> stores() {
- *             return Collections.singleton(storeBuilder);
- *         }
- *     }
- * }
+ *   @Override
+ *   public Set<StoreBuilder<?>> stores() {
+ *     return Collections.singleton(
+ *       Stores.keyValueStoreBuilder(Stores.persistentKeyValueStore("myStore"), Serdes.String(), Serdes.String())
+ *     );
+ *   }
  * }</pre>
- *
- * @see Topology#addProcessor(String, org.apache.kafka.streams.processor.api.ProcessorSupplier, String...)
- * @see KStream#process(org.apache.kafka.streams.processor.api.ProcessorSupplier, String...)
- * @see KStream#process(org.apache.kafka.streams.processor.api.ProcessorSupplier, Named, String...)
- * @see KStream#processValues(FixedKeyProcessorSupplier, String...)
- * @see KStream#processValues(FixedKeyProcessorSupplier, Named, String...)
  */
 public interface ConnectedStoreProvider {
 
     /**
-     * @return the state stores to be connected and added, or null if no stores should be automatically connected and added.
+     * Return a set of {@link StoreBuilder StoreBuilders}.
+     * The that will be automatically added to the {@link Topology} and connected to the associated
+     * {@link Topology#addProcessor(String, ProcessorSupplier, String...) processor}.
+     *
+     * @return The state stores for a {@link org.apache.kafka.streams.processor.api.Processor}
      */
     default Set<StoreBuilder<?>> stores() {
         return null;

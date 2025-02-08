@@ -19,10 +19,15 @@ package org.apache.kafka.streams;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.streams.kstream.GlobalKTable;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.TimestampExtractor;
+import org.apache.kafka.streams.processor.api.ProcessorSupplier;
+import org.apache.kafka.streams.state.StoreBuilder;
 
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * {@code KafkaClientSupplier} can be used to provide custom Kafka clients to a {@link KafkaStreams} instance.
@@ -31,48 +36,74 @@ import java.util.Map;
  */
 public interface KafkaClientSupplier {
     /**
-     * Create an {@link Admin} which is used for internal topic management.
+     * Create an {@link Admin admin client} which is used for internal topic management.
      *
-     * @param config Supplied by the {@link java.util.Properties} given to the {@link KafkaStreams}
-     * @return an instance of {@link Admin}
+     * @param config
+     *        {@link StreamsConfig#getAdminConfigs(String) admit config} which is supplied by the
+     *        {@link java.util.Properties Properties} given to the
+     *        {@link KafkaStreams#KafkaStreams(Topology, Properties) KafkaStreams} instance
+     *
+     * @return An instance of Kafka {@link Admin client}.
      */
     default Admin getAdmin(final Map<String, Object> config) {
         throw new UnsupportedOperationException("Implementations of KafkaClientSupplier should implement the getAdmin() method.");
     }
 
     /**
-     * Create a {@link Producer} which is used to write records to sink topics.
+     * Create a {@link Producer producer client} which is used to write records to topics.
      *
-     * @param config {@link StreamsConfig#getProducerConfigs(String) producer config} which is supplied by the
-     *               {@link java.util.Properties} given to the {@link KafkaStreams} instance
-     * @return an instance of Kafka producer
+     * @param config
+     *        {@link StreamsConfig#getProducerConfigs(String) producer config} which is supplied by the
+     *        {@link java.util.Properties Properties} given to the
+     *        {@link KafkaStreams#KafkaStreams(Topology, Properties) KafkaStreams} instance
+     *
+     * @return An instance of Kafka {@link Producer Producer client}.
      */
     Producer<byte[], byte[]> getProducer(final Map<String, Object> config);
 
     /**
-     * Create a {@link Consumer} which is used to read records of source topics.
+     * Create a {@link Consumer consumer client} which is used to read records from input and repartition topics.
+     * This consumer is called the "main consumer" is forms a consumer group using the
+     * {@link StreamsConfig#APPLICATION_ID_CONFIG application.id} as it's {@code group.id}.
      *
-     * @param config {@link StreamsConfig#getMainConsumerConfigs(String, String, int) consumer config} which is
-     *               supplied by the {@link java.util.Properties} given to the {@link KafkaStreams} instance
-     * @return an instance of Kafka consumer
+     * @param config
+     *        {@link StreamsConfig#getMainConsumerConfigs(String, String, int) consumer config} which is supplied by the
+     *        {@link java.util.Properties Properties} given to the
+     *        {@link KafkaStreams#KafkaStreams(Topology, Properties) KafkaStreams} instance
+     *
+     * @return An instance of Kafka {@link Consumer Consumer client}.
      */
     Consumer<byte[], byte[]> getConsumer(final Map<String, Object> config);
 
     /**
-     * Create a {@link Consumer} which is used to read records to restore {@link StateStore}s.
+     * Create a {@link Consumer consumer client} which is used to read records from changelog topic to restore
+     * {@link StateStore}s, and maintain standby tasks.
+     * This consumer is called the "restore consumer" and it uses explicit
+     * {@link org.apache.kafka.clients.consumer.KafkaConsumer#assign(java.util.Collection) partition assignment},
+     * does not form a consumer group, nor does it commit offsets.
      *
-     * @param config {@link StreamsConfig#getRestoreConsumerConfigs(String) restore consumer config} which is supplied
-     *               by the {@link java.util.Properties} given to the {@link KafkaStreams}
-     * @return an instance of Kafka consumer
+     * @param config
+     *        {@link StreamsConfig#getRestoreConsumerConfigs(String) restore consumer config} which is supplied
+     *        by the {@link java.util.Properties Properties} given to the
+     *        {@link KafkaStreams#KafkaStreams(Topology, Properties) KafkaStreams} instance
+     *
+     * @return An instance of Kafka {@link Consumer Consumer client}.
      */
     Consumer<byte[], byte[]> getRestoreConsumer(final Map<String, Object> config);
 
     /**
-     * Create a {@link Consumer} which is used to consume records for {@link GlobalKTable}.
+     * Create a {@link Consumer consumer client} which is used to consume records for
+     * {@link Topology#addGlobalStore(StoreBuilder, String, Deserializer, Deserializer, String, String, ProcessorSupplier) global state stores}
+     * and {@link GlobalKTable}.
+     * This consumer is called the "global consumer" and it uses explicit
+     * {@link org.apache.kafka.clients.consumer.KafkaConsumer#assign(java.util.Collection) partition assignment},
+     * does not form a consumer group, nor does it commit offsets.
      *
      * @param config {@link StreamsConfig#getGlobalConsumerConfigs(String) global consumer config} which is supplied
-     *               by the {@link java.util.Properties} given to the {@link KafkaStreams}
-     * @return an instance of Kafka consumer
+     *               by the {@link java.util.Properties Properties} given to the
+     *               {@link KafkaStreams#KafkaStreams(Topology, Properties) KafkaStreams} instance
+     *
+     * @return An instance of Kafka {@link Consumer Consumer client}
      */
     Consumer<byte[], byte[]> getGlobalConsumer(final Map<String, Object> config);
 }
