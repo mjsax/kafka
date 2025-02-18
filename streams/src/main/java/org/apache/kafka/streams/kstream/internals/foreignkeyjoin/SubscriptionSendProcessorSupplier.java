@@ -142,6 +142,64 @@ public class SubscriptionSendProcessorSupplier<KLeft, VLeft, KRight>
         }
 
         private void defaultJoinInstructions(final Record<KLeft, Change<VLeft>> record) {
+//            final KRight oldForeignKey = record.value().oldValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().oldValue);
+//            boolean unsubscribe = oldForeignKey != null;
+//
+//            // if left row is inserted or updated, subscribe to new FK (if new FK is valid)
+//            if (record.value().newValue != null) {
+//                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), record.value().newValue);
+//
+//                if (newForeignKey == null) {
+//                    logSkippedRecordDueToNullForeignKey();
+//                    if (unsubscribe) {
+//                        forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
+//                    }
+//                } else {
+//                    // regular insert/update
+//
+//                    // update subscription only, if the new FK is different from the old FK,
+//                    // to avoid unnecessary idempotent updates
+//                    if (Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+//                        return;
+//                    }
+//
+//                    if (unsubscribe) {
+//                        // update case
+//
+//                        // delete old subscription
+//                        // we don't need any response, as we only want a response from the new subscription
+//                        forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
+//
+//                        // subscribe to new key (note, could be on a different task/node than old key)
+//                        // additionally, propagate null if no FK is found there,
+//                        // since we must delete previous result (if any)
+//                        //
+//                        // this may lead to unnecessary tombstones if the old FK did not join
+//                        // and the new FK key does not join either;
+//                        // however, we cannot avoid it because old and new FK may be on different tasks/nodes,
+//                        // and thus, we cannot verify if the tombstone is needed or not
+//                        forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+//                    } else {
+//                        // insert
+//
+//                        // subscribe to new key
+//                        // don't propagate null if no FK is found there,
+//                        // for inserts, we know that there is need to delete any previoud result
+//                        forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
+//                    }
+//                }
+//            } else {
+//                // left row is deleted
+//                if (unsubscribe) {
+//                    // this may lead to unnecessary tombstones, if we delete an existing key,
+//                    // which did not join previously;
+//                    // however, we cannot avoid it as we have no means to know if the old FK joined or not
+//                    forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
+//                }
+//            }
+
+            // -------------------------------------------
+
             if (record.value().oldValue != null) {
                 final KRight oldForeignKey = record.value().oldValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().oldValue);
                 if (oldForeignKey == null) {
