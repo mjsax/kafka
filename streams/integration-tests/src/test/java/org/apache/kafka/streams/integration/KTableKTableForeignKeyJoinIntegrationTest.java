@@ -41,6 +41,7 @@ import org.apache.kafka.test.TestUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -283,6 +284,388 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
                 );
             }
         }
+    }
+
+    @ParameterizedTest
+    @MethodSource("testCases")
+    public void test(final boolean leftJoin,
+                     final String optimization,
+                     final boolean materialized,
+                     final boolean rejoin,
+                     final boolean leftVersioned,
+                     final boolean rightVersioned) {
+        if (StreamsConfig.OPTIMIZE.equals(optimization)) return;
+        if (materialized) return;
+        if (rejoin) return;
+        if (leftVersioned) return;
+        if (rightVersioned) return;
+        final Properties streamsConfig = getStreamsProperties(StreamsConfig.NO_OPTIMIZATION);
+        final Topology topology = getTopology(streamsConfig, null, leftJoin, false, false, false);
+        try (final TopologyTestDriver driver = new TopologyTestDriver(topology, streamsConfig)) {
+            final TestInputTopic<String, String> right = driver.createInputTopic(RIGHT_TABLE, new StringSerializer(), new StringSerializer());
+            final TestInputTopic<String, String> left = driver.createInputTopic(LEFT_TABLE, new StringSerializer(), new StringSerializer());
+            final TestOutputTopic<String, String> outputTopic = driver.createOutputTopic(OUTPUT, new StringDeserializer(), new StringDeserializer());
+
+            rightHandSideEmpty(left, outputTopic, leftJoin);
+            rightHandSideNoneJoiningKey(left, right, outputTopic, leftJoin);
+            rightHandSideJoiningKey(left, right, outputTopic, leftJoin);
+        }
+    }
+
+    private void rightHandSideEmpty(final TestInputTopic<String, String> left,
+                                    final TestOutputTopic<String, String> outputTopic,
+                                    final boolean leftJoin) {
+        final List<Map<String, String>> expected = new LinkedList<>();
+        if (!leftJoin) {
+            expected.add(emptyMap()); // idempotent delete
+            expected.add(emptyMap()); // insert invalid FK
+            expected.add(emptyMap()); // update invalid FK -> invalid FK
+            expected.add(emptyMap()); // update invalid FK -> valid FK (non-existing)
+            expected.add(emptyMap()); // update invalid FK -> valid FK (joining)
+            expected.add(emptyMap()); // delete invalid FK
+            expected.add(emptyMap()); // insert non-existing FK
+            expected.add(emptyMap()); // insert existing FK
+
+            // TODO verify
+            //expected.add(mkMap(mkEntry("lhs4", null))); // update non-existing FK -> invalid FK
+            expected.add(emptyMap());
+
+            expected.add(mkMap(mkEntry("lhs5", null))); // update non-existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", null))); // update non-existing FK -> existing FK
+
+            // TODO verify
+            //expected.add(mkMap(mkEntry("lhs3", null))); // update existing FK -> invalid FK
+            expected.add(emptyMap());
+
+            expected.add(mkMap(mkEntry("lhs6", null))); // update existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs7", null))); // update existing FK -> existing FK
+
+            // TODO: fix bug
+            //expected.add(emptyMap()); // update existing FK -> same FK
+            expected.add(mkMap(mkEntry("lhs7", null))); // unnecessary idempotent result
+
+            expected.add(mkMap(mkEntry("lhs5", null))); // delete non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", null))); // delete existing FK        } else {
+        } else {
+            expected.add(emptyMap()); // idempotent delete
+            expected.add(mkMap( // insert invalid FK
+                mkEntry("lhs1", "(lhsValue1|,null)"),
+                mkEntry("lhs2", "(lhsValue2|,null)"),
+                mkEntry("lhs3", "(lhsValue3|,null)")
+            ));
+            expected.add(mkMap(mkEntry("lhs1", "(lhsValue1-2|,null)"))); // update invalid FK -> invalid FK
+            expected.add(mkMap(mkEntry("lhs2", "(lhsValue2-2|non-existing-fk,null)"))); // update invalid FK -> valid FK (non-existing)
+            expected.add(mkMap(mkEntry("lhs3", "(lhsValue3-2|rhs1,null)"))); // update invalid FK -> valid FK (joining)
+            expected.add(mkMap(mkEntry("lhs1", null))); // delete invalid FK
+            expected.add(mkMap(  // insert non-existing FK
+                mkEntry("lhs4", "(lhsValue4|non-existing,null)"),
+                mkEntry("lhs5", "(lhsValue5|non-existing,null)"),
+                mkEntry("lhs6", "(lhsValue6|non-existing,null)")
+            ));
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7|rhs1,null)"))); // insert existing FK
+            expected.add(mkMap(mkEntry("lhs4", "(lhsValue4|,null)"))); // update non-existing FK -> invalid FK
+            expected.add(mkMap(mkEntry("lhs5", "(lhsValue5|non-existing-2,null)"))); // update non-existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", "(lhsValue6-2|rhs1,null)"))); // update non-existing FK -> existing FK
+            expected.add(mkMap(mkEntry("lhs3", "(lhsValue3-3|,null)"))); // update existing FK -> invalid FK
+            expected.add(mkMap(mkEntry("lhs6", "(lhsValue6-3|non-existing-2,null)"))); // update existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7-2|rhs2,null)"))); // update existing FK -> existing FK
+
+            // TODO: fix bug
+            //expected.add(emptyMap()); // update existing FK -> same FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7-2|rhs2,null)"))); // unnecessary idempotent result
+
+            expected.add(mkMap(mkEntry("lhs5", null))); // delete non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", null))); // delete existing FK
+        }
+
+        pipeLeftSideInputs(
+            left,
+            outputTopic,
+            expected
+        );
+    }
+
+    private void rightHandSideNoneJoiningKey(final TestInputTopic<String, String> left,
+                                             final TestInputTopic<String, String> right,
+                                             final TestOutputTopic<String, String> outputTopic,
+                                             final boolean leftJoin) {
+        // non-empty right hand side
+        right.pipeInput("non-joining-key", "dummyValue", baseTimestamp);
+
+        // delete existing rows
+        left.pipeInput("lhs1", null, baseTimestamp);
+        left.pipeInput("lhs2", null, baseTimestamp);
+        left.pipeInput("lhs3", null, baseTimestamp);
+        left.pipeInput("lhs4", null, baseTimestamp);
+        left.pipeInput("lhs5", null, baseTimestamp);
+        left.pipeInput("lhs6", null, baseTimestamp);
+        left.pipeInput("lhs7", null, baseTimestamp);
+        outputTopic.readKeyValuesToMap(); // drain the output topic
+
+        // should produce same result as if right hand side is empty
+        rightHandSideEmpty(left, outputTopic, leftJoin);
+    }
+
+    private void rightHandSideJoiningKey(final TestInputTopic<String, String> left,
+                                         final TestInputTopic<String, String> right,
+                                         final TestOutputTopic<String, String> outputTopic,
+                                         final boolean leftJoin) {
+        right.pipeInput("rhs1", "rhsValue1", baseTimestamp);
+        right.pipeInput("rhs2", "rhsValue2", baseTimestamp);
+
+        // delete existing rows
+        left.pipeInput("lhs1", null, baseTimestamp);
+        left.pipeInput("lhs2", null, baseTimestamp);
+        left.pipeInput("lhs3", null, baseTimestamp);
+        left.pipeInput("lhs4", null, baseTimestamp);
+        left.pipeInput("lhs5", null, baseTimestamp);
+        left.pipeInput("lhs6", null, baseTimestamp);
+        left.pipeInput("lhs7", null, baseTimestamp);
+        outputTopic.readKeyValuesToMap(); // drain the output topic
+
+        final List<Map<String, String>> expected = new LinkedList<>();
+        if (!leftJoin) {
+            expected.add(emptyMap()); // idempotent delete
+            expected.add(emptyMap()); // insert invalid FK
+            expected.add(emptyMap()); // update invalid FK -> invalid FK
+            expected.add(emptyMap()); // update invalid FK -> valid FK (non-existing)
+
+            // TODO bug-fix
+            //expected.add(mkMap(mkEntry("lhs3", "(lhsValue3-2|rhs1,rhsValue1)"))); // update invalid FK -> valid FK (joining)
+            expected.add(emptyMap()); // missing result
+
+            expected.add(emptyMap()); // delete invalid FK
+            expected.add(emptyMap()); // insert non-existing FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7|rhs1,rhsValue1)"))); // insert existing FK
+
+            // TODO verify
+            //expected.add(mkMap(mkEntry("lhs4", null))); // update non-existing FK -> invalid FK
+            expected.add(emptyMap());
+
+            expected.add(mkMap(mkEntry("lhs5", null))); // update non-existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", "(lhsValue6-2|rhs1,rhsValue1)"))); // update non-existing FK -> existing FK
+
+            // TODO verify
+            //expected.add(mkMap(mkEntry("lhs3", null))); // update existing FK -> invalid FK
+            expected.add(emptyMap());
+
+            expected.add(mkMap(mkEntry("lhs6", null))); // update existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // update existing FK -> existing FK
+
+            // TODO: fix bug
+            //expected.add(emptyMap()); // update existing FK -> same FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // unnecessary idempotent result
+
+            expected.add(mkMap(mkEntry("lhs5", null))); // delete non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", null))); // delete existing FK
+        } else {
+            expected.add(emptyMap()); // idempotent delete
+            expected.add(mkMap( // insert invalid FK
+                mkEntry("lhs1", "(lhsValue1|,null)"),
+                mkEntry("lhs2", "(lhsValue2|,null)"),
+                mkEntry("lhs3", "(lhsValue3|,null)")
+            ));
+            expected.add(mkMap(mkEntry("lhs1", "(lhsValue1-2|,null)"))); // update invalid FK -> invalid FK
+            expected.add(mkMap(mkEntry("lhs2", "(lhsValue2-2|non-existing-fk,null)"))); // update invalid FK -> valid FK (non-existing)
+            expected.add(mkMap(mkEntry("lhs3", "(lhsValue3-2|rhs1,rhsValue1)"))); // update invalid FK -> valid FK (joining)
+            expected.add(mkMap(mkEntry("lhs1", null))); // delete invalid FK
+            expected.add(mkMap(  // insert non-existing FK
+                mkEntry("lhs4", "(lhsValue4|non-existing,null)"),
+                mkEntry("lhs5", "(lhsValue5|non-existing,null)"),
+                mkEntry("lhs6", "(lhsValue6|non-existing,null)")
+            ));
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7|rhs1,rhsValue1)"))); // insert existing FK
+            expected.add(mkMap(mkEntry("lhs4", "(lhsValue4|,null)"))); // update non-existing FK -> invalid FK
+            expected.add(mkMap(mkEntry("lhs5", "(lhsValue5|non-existing-2,null)"))); // update non-existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", "(lhsValue6-2|rhs1,rhsValue1)"))); // update non-existing FK -> existing FK
+            expected.add(mkMap(mkEntry("lhs3", "(lhsValue3-3|,null)"))); // update existing FK -> invalid FK
+            expected.add(mkMap(mkEntry("lhs6", "(lhsValue6-3|non-existing-2,null)"))); // update existing FK -> non-existing FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // update existing FK -> existing FK
+
+            // TODO: fix bug
+            //expected.add(emptyMap()); // update existing FK -> same FK
+            expected.add(mkMap(mkEntry("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // unnecessary idempotent result
+
+            expected.add(mkMap(mkEntry("lhs5", null))); // delete non-existing FK
+            expected.add(mkMap(mkEntry("lhs6", null))); // delete existing FK
+        }
+
+        pipeLeftSideInputs(
+            left,
+            outputTopic,
+            expected
+        );
+    }
+
+    private static class Counter {
+        private int count = 0;
+    }
+
+    private void pipeLeftSideInputs(final TestInputTopic<String, String> left,
+                                    final TestOutputTopic<String, String> outputTopic,
+                                    final List<Map<String, String>> expected) {
+        Counter counter = new Counter();
+
+        // idempotent delete
+        left.pipeInput("none-existing-key", null, baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        insertInvalidFK(left, outputTopic, expected, counter);
+        updateInvalidFK(left, outputTopic, expected, counter);
+        deleteInvalidFK(left, outputTopic, expected, counter);
+
+        insertValidFK(left, outputTopic, expected, counter);
+        updateValidFK(left, outputTopic, expected, counter);
+        deleteValidFK(left, outputTopic, expected, counter);
+    }
+
+    private void insertInvalidFK(final TestInputTopic<String, String> left,
+                                 final TestOutputTopic<String, String> outputTopic,
+                                 final List<Map<String, String>> expected,
+                                 final Counter counter) {
+        // invalid FK
+        left.pipeInput("lhs1", "lhsValue1|", baseTimestamp);
+        left.pipeInput("lhs2", "lhsValue2|", baseTimestamp);
+        left.pipeInput("lhs3", "lhsValue3|", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+    }
+
+    private void updateInvalidFK(final TestInputTopic<String, String> left,
+                                 final TestOutputTopic<String, String> outputTopic,
+                                 final List<Map<String, String>> expected,
+                                 final Counter counter) {
+        // update invalid FK -> invalid FK
+        left.pipeInput("lhs1", "lhsValue1-2|", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update invalid FK -> valid FK (non-existing)
+        left.pipeInput("lhs2", "lhsValue2-2|non-existing-fk", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update invalid FK -> valid FK (joining)
+        left.pipeInput("lhs3", "lhsValue3-2|rhs1", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+    }
+
+    private void deleteInvalidFK(final TestInputTopic<String, String> left,
+                                 final TestOutputTopic<String, String> outputTopic,
+                                 final List<Map<String, String>> expected,
+                                 final Counter counter) {
+        // delete invalid FK
+        left.pipeInput("lhs1", null, baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+    }
+
+    private void insertValidFK(final TestInputTopic<String, String> left,
+                               final TestOutputTopic<String, String> outputTopic,
+                               final List<Map<String, String>> expected,
+                               final Counter counter) {
+        // insert non-existing FK
+        left.pipeInput("lhs4", "lhsValue4|non-existing", baseTimestamp);
+        left.pipeInput("lhs5", "lhsValue5|non-existing", baseTimestamp);
+        left.pipeInput("lhs6", "lhsValue6|non-existing", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // insert existing FK
+        left.pipeInput("lhs7", "lhsValue7|rhs1", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+    }
+
+    private void updateValidFK(final TestInputTopic<String, String> left,
+                               final TestOutputTopic<String, String> outputTopic,
+                               final List<Map<String, String>> expected,
+                               final Counter counter) {
+        // update non-existing FK -> invalid FK
+        left.pipeInput("lhs4", "lhsValue4|", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update non-existing FK -> non-existing FK
+        left.pipeInput("lhs5", "lhsValue5|non-existing-2", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update non-existing FK -> existing FK
+        left.pipeInput("lhs6", "lhsValue6-2|rhs1", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update existing FK -> invalid FK
+        left.pipeInput("lhs3", "lhsValue3-3|", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update existing FK -> non-existing FK
+        left.pipeInput("lhs6", "lhsValue6-3|non-existing-2", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update existing FK -> existing FK
+        left.pipeInput("lhs7", "lhsValue7-2|rhs2", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // update existing FK -> same FK
+        left.pipeInput("lhs7", "lhsValue7-2|rhs2", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+    }
+
+    private void deleteValidFK(final TestInputTopic<String, String> left,
+                               final TestOutputTopic<String, String> outputTopic,
+                               final List<Map<String, String>> expected,
+                               final Counter counter) {
+        // delete non-existing FK
+        left.pipeInput("lhs5", null, baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
+
+        // delete existing FK
+        left.pipeInput("lhs6", null, baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToMap(),
+            is(expected.get(counter.count++))
+        );
     }
 
     @ParameterizedTest
@@ -808,7 +1191,11 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
             rejoin,
             leftVersioned,
             rightVersioned,
-            value -> value.split("\\|")[1]
+            value -> {
+                final String[] tokens = value.split("\\|");
+                return tokens.length == 2 ? tokens[1] : null;
+            }
+
         );
     }
 
