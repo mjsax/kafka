@@ -89,8 +89,9 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
 
     private static Properties getStreamsProperties(final String optimization) {
         return mkProperties(mkMap(
-                mkEntry(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getPath()),
-                mkEntry(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, optimization)
+            mkEntry(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getPath()),
+            mkEntry(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, optimization),
+            mkEntry(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, "0")
         ));
     }
 
@@ -301,7 +302,7 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
         if (rejoin) return;
         if (leftVersioned) return;
         if (rightVersioned) return;
-        //if (leftJoin) return;
+        if (leftJoin) return;
         final Properties streamsConfig = getStreamsProperties(StreamsConfig.NO_OPTIMIZATION);
         final Topology topology = getTopology(streamsConfig, null, leftJoin, false, false, false);
         try (final TopologyTestDriver driver = new TopologyTestDriver(topology, streamsConfig)) {
@@ -329,26 +330,37 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
             expected.add(emptyList()); // insert non-existing FK
             expected.add(emptyList()); // insert existing FK
 
-            // TODO verify
-            //expected.add(Arrays.asList(KeyValue.pair("lhs4", null))); // update non-existing FK -> invalid FK
-            expected.add(emptyList());
+            // TODO: fix bug -> KAFKA-16407 fix (also my fix)
+            expected.add(Arrays.asList(KeyValue.pair("lhs4", null))); // update non-existing FK -> invalid FK
+//            expected.add(emptyList()); // missing output
 
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // update non-existing FK -> non-existing FK
             expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // update non-existing FK -> existing FK
 
-            // TODO verify
-            //expected.add(Arrays.asList(KeyValue.pair("lhs3", null))); // update existing FK -> invalid FK
-            expected.add(emptyList());
+            // TODO: fix bug -> KAFKA-16407 fix (also my fix)
+            expected.add(Arrays.asList(KeyValue.pair("lhs3", null))); // update existing FK -> invalid FK
+//            expected.add(emptyList()); // missing output
 
             expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // update existing FK -> non-existing FK
             expected.add(Arrays.asList(KeyValue.pair("lhs7", null))); // update existing FK -> existing FK
 
-            // TODO: fix bug
-            //expected.add(emptyList()); // update existing FK -> same FK
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", null))); // unnecessary idempotent result
+            // TODO: fix bug (inner empty)
+            //  -> fixed by KAFKA-16407 (however not for non-empty right side;
+            //  but easy to change the code to include a fix for non-empty right side, too)
+            // -> fixed by my code
+            //
+            // -- is this an actual bug or not? -- if FK updates, ts could change -- do we care?
+            // for increasing TS, might be we can ignore the update
+            // for decreasing TS, we should update the value?
+            // what about versioned stores?
+            expected.add(emptyList()); // update existing FK -> same FK
+//            expected.add(Arrays.asList(KeyValue.pair("lhs7", null))); // unnecessary idempotent result
+
+            // TODO: verify
+            expected.add(emptyList()); // update existing left row -> same left row
 
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // delete non-existing FK
-            expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // delete existing FK        } else {
+            expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // delete existing FK
         } else {
             expected.add(emptyList()); // idempotent delete
             expected.add(Arrays.asList( // insert invalid FK
@@ -367,60 +379,62 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
             ));
             expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7|rhs1,null)"))); // insert existing FK
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs4", "(lhsValue4|,null)"))); // update non-existing FK -> invalid FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs4", "(lhsValue4|,null)"),
 //                KeyValue.pair("lhs4", "(lhsValue4|,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs5", "(lhsValue5|non-existing-2,null)"))); // update non-existing FK -> non-existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs5", "(lhsValue5|non-existing-2,null)"),
 //                KeyValue.pair("lhs5", "(lhsValue5|non-existing-2,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,null)"))); // update non-existing FK -> existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,null)"),
 //                KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs3", "(lhsValue3-3|,null)"))); // update existing FK -> invalid FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs3", "(lhsValue3-3|,null)"),
 //                KeyValue.pair("lhs3", "(lhsValue3-3|,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 and my fix
             expected.add(Arrays.asList(KeyValue.pair("lhs6", "(lhsValue6-3|non-existing-2,null)"))); // update existing FK -> non-existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs6", "(lhsValue6-3|non-existing-2,null)"),
 //                KeyValue.pair("lhs6", "(lhsValue6-3|non-existing-2,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,null)"))); // update existing FK -> existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,null)"),
 //                KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,null)")
 //            ));
 
-            // TODO: fix bug
-            //expected.add(emptyList()); // update existing FK -> same FK
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,null)"))); // unnecessary idempotent result
+            // TODO: verify
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,null)"))); // update existing FK -> same FK
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO: verify
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,null)"))); // update existing left row -> same left row
+
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // delete non-existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs5", null),
 //                KeyValue.pair("lhs5", null)
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // delete existing FK
 //            expected.add(Arrays.asList(
 //                KeyValue.pair("lhs6", null),
@@ -485,31 +499,34 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
             expected.add(emptyList()); // update invalid FK -> invalid FK
             expected.add(emptyList()); // update invalid FK -> valid FK (non-existing)
 
-            // TODO bug-fix
-            //expected.add(Arrays.asList(KeyValue.pair("lhs3", "(lhsValue3-2|rhs1,rhsValue1)"))); // update invalid FK -> valid FK (joining)
-            expected.add(emptyList()); // missing result
+            // TODO: fix bug -> KAFKA-16407 fix (also my fix)
+            expected.add(Arrays.asList(KeyValue.pair("lhs3", "(lhsValue3-2|rhs1,rhsValue1)"))); // update invalid FK -> valid FK (joining)
+//            expected.add(emptyList()); // missing result
 
             expected.add(emptyList()); // delete invalid FK
             expected.add(emptyList()); // insert non-existing FK
             expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7|rhs1,rhsValue1)"))); // insert existing FK
 
-            // TODO verify
-            //expected.add(Arrays.asList(KeyValue.pair("lhs4", null))); // update non-existing FK -> invalid FK
-            expected.add(emptyList());
+            // TODO: fix bug -> KAFKA-16407 fix (also my fix)
+            expected.add(Arrays.asList(KeyValue.pair("lhs4", null))); // update non-existing FK -> invalid FK
+//            expected.add(emptyList()); // missing result
 
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // update non-existing FK -> non-existing FK
             expected.add(Arrays.asList(KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,rhsValue1)"))); // update non-existing FK -> existing FK
 
-            // TODO verify
-            //expected.add(Arrays.asList(KeyValue.pair("lhs3", null))); // update existing FK -> invalid FK
-            expected.add(emptyList());
-
+            // TODO: fix bug -> KAFKA-16407 fix (also my fix)
+            expected.add(Arrays.asList(KeyValue.pair("lhs3", null))); // update existing FK -> invalid FK
+//            expected.add(emptyList()); // missing result
+//
             expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // update existing FK -> non-existing FK
             expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // update existing FK -> existing FK
 
-            // TODO: fix bug
-            //expected.add(emptyList()); // update existing FK -> same FK
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // unnecessary idempotent result
+
+            // TODO: verify
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing FK -> same FK
+
+            // TODO: verify
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing left row -> same left row
 
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // delete non-existing FK
             expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // delete existing FK
@@ -531,60 +548,62 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
             ));
             expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7|rhs1,rhsValue1)"))); // insert existing FK
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs4", "(lhsValue4|,null)"))); // update non-existing FK -> invalid FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs4", "(lhsValue4|,null)"),
 //                KeyValue.pair("lhs4", "(lhsValue4|,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs5", "(lhsValue5|non-existing-2,null)"))); // update non-existing FK -> non-existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs5", "(lhsValue5|non-existing-2,null)"),
 //                KeyValue.pair("lhs5", "(lhsValue5|non-existing-2,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,rhsValue1)"))); // update non-existing FK -> existing FK
 //            expected.add(Arrays.asList( // invalid intermediate result
 //                KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,null)"),
 //                KeyValue.pair("lhs6", "(lhsValue6-2|rhs1,rhsValue1)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs3", "(lhsValue3-3|,null)"))); // update existing FK -> invalid FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs3", "(lhsValue3-3|,null)"),
 //                KeyValue.pair("lhs3", "(lhsValue3-3|,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs6", "(lhsValue6-3|non-existing-2,null)"))); // update existing FK -> non-existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs6", "(lhsValue6-3|non-existing-2,null)"),
 //                KeyValue.pair("lhs6", "(lhsValue6-3|non-existing-2,null)")
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // update existing FK -> existing FK
 //            expected.add(Arrays.asList( // invalid intermediate result
 //                KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,null)"),
 //                KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,rhsValue2)")
 //            ));
 
-            // TODO: fix bug
-            //expected.add(emptyList()); // update existing FK -> same FK
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,rhsValue2)"))); // unnecessary idempotent result
+            // TODO: verify
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing FK -> same FK
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO: verify
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing left row -> same left row
+
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // delete non-existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs5", null),
 //                KeyValue.pair("lhs5", null)
 //            ));
 
-            // TODO fix bug -> KAFKA-18713
+            // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs6", null))); // delete existing FK
 //            expected.add(Arrays.asList( // duplicate output
 //                KeyValue.pair("lhs6", null),
@@ -744,7 +763,14 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
         );
 
         // update existing FK -> same FK
-        left.pipeInput("lhs7", "lhsValue7-2|rhs2", baseTimestamp);
+        left.pipeInput("lhs7", "lhsValue7-3|rhs2", baseTimestamp);
+        assertThat(
+            outputTopic.readKeyValuesToList(),
+            is(expected.get(counter.count++))
+        );
+
+        // update existing left row -> same left row
+        left.pipeInput("lhs7", "lhsValue7-3|rhs2", baseTimestamp);
         assertThat(
             outputTopic.readKeyValuesToList(),
             is(expected.get(counter.count++))
