@@ -276,103 +276,103 @@ public class SubscriptionSendProcessorSupplier<KLeft, VLeft, KRight>
         }
 
         private void defaultJoinInstructions(final Record<KLeft, Change<VLeft>> record) {
-            // my fix
-            final VLeft oldValue = record.value().oldValue;
-            final VLeft newValue = record.value().newValue;
-
-            final KRight oldForeignKey = oldValue == null ? null : foreignKeyExtractor.extract(record.key(), oldValue);
-            final boolean unsubscribe = oldForeignKey != null;
-
-            // if left row is inserted or updated, subscribe to new FK (if new FK is valid)
-            if (newValue != null) {
-                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), newValue);
-
-                if (newForeignKey == null) {
-                    logSkippedRecordDueToNullForeignKey();
-                    if (unsubscribe) {
-                        // delete old subscription
-                        //
-                        // this may lead to unnecessary tombstones if the old FK did not join
-                        // however, we cannot avoid it as we have no means to know if the old FK joined or not
-                        forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
-                    }
-                } else {
-                    // regular insert/update
-
-                    // update subscription only, if the new value is different from the old value,
-                    // to avoid unnecessary idempotent updates
-//                    if (Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+//            // my fix
+//            final VLeft oldValue = record.value().oldValue;
+//            final VLeft newValue = record.value().newValue;
+//
+//            final KRight oldForeignKey = oldValue == null ? null : foreignKeyExtractor.extract(record.key(), oldValue);
+//            final boolean unsubscribe = oldForeignKey != null;
+//
+//            // if left row is inserted or updated, subscribe to new FK (if new FK is valid)
+//            if (newValue != null) {
+//                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), newValue);
+//
+//                if (newForeignKey == null) {
+//                    logSkippedRecordDueToNullForeignKey();
+//                    if (unsubscribe) {
+//                        // delete old subscription
+//                        //
+//                        // this may lead to unnecessary tombstones if the old FK did not join
+//                        // however, we cannot avoid it as we have no means to know if the old FK joined or not
+//                        forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
+//                    }
+//                } else {
+//                    // regular insert/update
+//
+//                    // update subscription only, if the new value is different from the old value,
+//                    // to avoid unnecessary idempotent updates
+////                    if (Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+////                        return;
+////                    }
+//                    if (Arrays.equals(serializeLeftValue(newValue), serializeLeftValue(oldValue))) {
 //                        return;
 //                    }
-                    if (Arrays.equals(serializeLeftValue(newValue), serializeLeftValue(oldValue))) {
-                        return;
-                    }
-
-                    if (unsubscribe) {
-                        // update case
-
-                        // delete old subscription
-                        // we don't need any response, as we only want a response from the new subscription
-                        forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
-
-                        // subscribe to new key (note, could be on a different task/node than old key)
-                        // additionally, propagate null if no FK is found so we can delete the previous result (if any)
-                        //
-                        // this may lead to unnecessary tombstones if the old FK did not join
-                        // and the new FK key does not join either;
-                        // however, we cannot avoid it as we have no means to know if the old FK joined or not
-                        forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
-                    } else {
-                        // insert
-
-                        // subscribe to new key
-                        // don't propagate null if no FK is found;
-                        // for inserts, we know that there is need to delete any previous result
-                        forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
-                    }
-                }
-            } else {
-                // left row is deleted
-                if (unsubscribe) {
-                    // this may lead to unnecessary tombstones, if we delete an existing key,
-                    // which did not join previously;
-                    // however, we cannot avoid it as we have no means to know if the old FK joined or not
-                    forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
-                }
-            }
+//
+//                    if (unsubscribe) {
+//                        // update case
+//
+//                        // delete old subscription
+//                        // we don't need any response, as we only want a response from the new subscription
+//                        forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
+//
+//                        // subscribe to new key (note, could be on a different task/node than old key)
+//                        // additionally, propagate null if no FK is found so we can delete the previous result (if any)
+//                        //
+//                        // this may lead to unnecessary tombstones if the old FK did not join
+//                        // and the new FK key does not join either;
+//                        // however, we cannot avoid it as we have no means to know if the old FK joined or not
+//                        forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+//                    } else {
+//                        // insert
+//
+//                        // subscribe to new key
+//                        // don't propagate null if no FK is found;
+//                        // for inserts, we know that there is need to delete any previous result
+//                        forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
+//                    }
+//                }
+//            } else {
+//                // left row is deleted
+//                if (unsubscribe) {
+//                    // this may lead to unnecessary tombstones, if we delete an existing key,
+//                    // which did not join previously;
+//                    // however, we cannot avoid it as we have no means to know if the old FK joined or not
+//                    forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
+//                }
+//            }
 
             // -------------------------------------------
 
-//            // KAFKA-16407 fix
-//            if (record.value().oldValue != null) {
-//                final KRight oldForeignKey = foreignKeyExtractor.extract(record.key(), record.value().oldValue);
-//                final KRight newForeignKey = record.value().newValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().newValue);
-//
-//                if (oldForeignKey == null && newForeignKey == null) {
-//                    logSkippedRecordDueToNullForeignKey();
-//                } else if (oldForeignKey == null) {
-//                    forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
-//                } else if (newForeignKey == null) {
-//                    forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
-//                } else if (!Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
-//                    //Different Foreign Key - delete the old key value and propagate the new one.
-//                    //Delete it from the oldKey's state store
-//                    forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
-//                    //Add to the newKey's state store. Additionally, propagate null if no FK is found there,
-//                    //since we must "unset" any output set by the previous FK-join. This is true for both INNER
-//                    //and LEFT join.
-//                    forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
-//                } else { // unchanged FK
-//                    forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
-//                }
-//            } else if (record.value().newValue != null) {
-//                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), record.value().newValue);
-//                if (newForeignKey == null) {
-//                    logSkippedRecordDueToNullForeignKey();
-//                } else {
-//                    forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
-//                }
-//            }
+            // KAFKA-16407 fix
+            if (record.value().oldValue != null) {
+                final KRight oldForeignKey = foreignKeyExtractor.extract(record.key(), record.value().oldValue);
+                final KRight newForeignKey = record.value().newValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().newValue);
+
+                if (oldForeignKey == null && newForeignKey == null) {
+                    logSkippedRecordDueToNullForeignKey();
+                } else if (oldForeignKey == null) {
+                    forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
+                } else if (newForeignKey == null) {
+                    forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE);
+                } else if (!Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+                    //Different Foreign Key - delete the old key value and propagate the new one.
+                    //Delete it from the oldKey's state store
+                    forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
+                    //Add to the newKey's state store. Additionally, propagate null if no FK is found there,
+                    //since we must "unset" any output set by the previous FK-join. This is true for both INNER
+                    //and LEFT join.
+                    forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+                } else { // unchanged FK
+                    forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
+                }
+            } else if (record.value().newValue != null) {
+                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), record.value().newValue);
+                if (newForeignKey == null) {
+                    logSkippedRecordDueToNullForeignKey();
+                } else {
+                    forward(record, newForeignKey, PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE);
+                }
+            }
 
             // -------------------------------------------
 
