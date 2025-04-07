@@ -302,7 +302,7 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
         if (rejoin) return;
         if (leftVersioned) return;
         if (rightVersioned) return;
-        if (leftJoin) return;
+        if (!leftJoin) return;
         final Properties streamsConfig = getStreamsProperties(StreamsConfig.NO_OPTIMIZATION);
         final Topology topology = getTopology(streamsConfig, null, leftJoin, false, false, false);
         try (final TopologyTestDriver driver = new TopologyTestDriver(topology, streamsConfig)) {
@@ -421,11 +421,8 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
 //                KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,null)")
 //            ));
 
-            // TODO: verify
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,null)"))); // update existing FK -> same FK
-
-            // TODO: verify
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,null)"))); // update existing left row -> same left row
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,null)"))); // update existing FK -> same FK (different value)
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,null)"))); // update existing FK -> same FK (same value)
 
             // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // delete non-existing FK
@@ -590,11 +587,8 @@ public class KTableKTableForeignKeyJoinIntegrationTest {
 //                KeyValue.pair("lhs7", "(lhsValue7-2|rhs2,rhsValue2)")
 //            ));
 
-            // TODO: verify
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing FK -> same FK
-
-            // TODO: verify
-            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing left row -> same left row
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing FK -> same FK (different value)
+            expected.add(Arrays.asList(KeyValue.pair("lhs7", "(lhsValue7-3|rhs2,rhsValue2)"))); // update existing FK -> same FK (same value)
 
             // TODO fix bug -> KAFKA-18713 and KAFKA-16394 (also my fix)
             expected.add(Arrays.asList(KeyValue.pair("lhs5", null))); // delete non-existing FK

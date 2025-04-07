@@ -181,6 +181,9 @@ public class SubscriptionSendProcessorSupplierTest {
 
         assertThat(context.forwarded().size(), is(2));
         assertThat(
+            context.forwarded().get(0).record(),
+            is(new Record<>(fk1, new SubscriptionWrapper<>(hash(leftRecordValue), DELETE_KEY_NO_PROPAGATE, pk, 0), 0))
+        );        assertThat(
             context.forwarded().get(1).record(),
             is(new Record<>(fk2, new SubscriptionWrapper<>(hash(leftRecordValue), PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE, pk, 0), 0))
         );
@@ -262,7 +265,7 @@ public class SubscriptionSendProcessorSupplierTest {
 
         leftJoinProcessor.process(new Record<>(pk, new Change<>(null, new LeftValue(fk1)), 0));
 
-        assertThat(context.forwarded().size(), greaterThan(0));
+        assertThat(context.forwarded().size(), is(0));
         assertThat(
             context.forwarded().get(0).record(),
             is(new Record<>(fk1, new SubscriptionWrapper<>(null, DELETE_KEY_AND_PROPAGATE, pk, 0), 0))

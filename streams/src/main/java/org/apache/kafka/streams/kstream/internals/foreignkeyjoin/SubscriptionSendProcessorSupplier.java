@@ -129,45 +129,56 @@ public class SubscriptionSendProcessorSupplier<KLeft, VLeft, KRight>
         }
 
         private void leftJoinInstructions(final Record<KLeft, Change<VLeft>> record) {
-            // my fix simplified
-            final VLeft oldValue = record.value().oldValue;
-            final VLeft newValue = record.value().newValue;
-
-            if (oldValue == null && newValue == null) {
-                // no output for idempotent left hand side deletes
-                return;
-            }
-
-            final KRight oldForeignKey = oldValue == null ? null : foreignKeyExtractor.extract(record.key(), oldValue);
-            final KRight newForeignKey = newValue == null ? null : foreignKeyExtractor.extract(record.key(), newValue);
-
-            // update subscription only, if the new left value is different from the old left value,
-            // to avoid unnecessary idempotent updates
-//            if (Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+//            // my fix simplified
+//            final VLeft oldValue = record.value().oldValue;
+//            final VLeft newValue = record.value().newValue;
+//
+//            if (oldValue == null && newValue == null) {
+//                // no output for idempotent left hand side deletes
 //                return;
 //            }
-            if (Arrays.equals(serializeLeftValue(newValue), serializeLeftValue(oldValue))) {
-                return;
-            }
-
-            final boolean unsubscribe = oldForeignKey != null;
-            if (unsubscribe) {
-                // this may lead to unnecessary tombstones, if we delete an existing key,
-                // which did not join previously;
-                // however, we cannot avoid it as we have no means to know if the old FK joined or not
-                forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
-            }
-
-            // for all cases, insert, update, and delete, we send a new subscription
-            // we need to get a response back for all cases to always produce a left-join result
-            //
-            // note: for delete, `newForeignKey` is null, what is a "hack"
-            // no actual subscription will be added for null-FK, but we still get the response back we need
-            //
-            // this may lead to unnecessary tombstones, if we delete an existing key,
-            // which did not join previously;
-            // however, we cannot avoid it as we have no means to know if the old FK joined or not
-            forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+//
+//            final KRight oldForeignKey = oldValue == null ? null : foreignKeyExtractor.extract(record.key(), oldValue);
+//            final KRight newForeignKey = newValue == null ? null : foreignKeyExtractor.extract(record.key(), newValue);
+//
+//            // this sound incorrect -- even if the old and new FK are the same, the _left row_ might have changed
+//            // -> thus we still need to send the new subscription to update the result
+//            // update subscription only, if the new left value is different from the old left value,
+//            // to avoid unnecessary idempotent updates
+//            // there is still a difference for this case -- we send the subscription to the same partition,
+//            // and thus, we only need to send a single subscription update, not two
+//            // (even if this is just a minor optimization: the first "unsubscribe" would not result in a response anyway,
+//            // so we only take of some load from the subscription topic, and the right hand side store/processor).
+//            // we need to send two if the FK changes though
+////            if (Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+////                return;
+////            }
+//
+//            // Let's not do this -- we have emit-on-update semantics, not emit-on-change
+//            // KIP-557 proposed this, but was rolled back
+//            // it's also questionable if emit-on-change would even be correct for versioned tables
+////            if (Arrays.equals(serializeLeftValue(newValue), serializeLeftValue(oldValue))) {
+////                return;
+////            }
+//
+//            final boolean unsubscribe = oldForeignKey != null;
+//            if (unsubscribe) {
+//                // this may lead to unnecessary tombstones, if we delete an existing key,
+//                // which did not join previously;
+//                // however, we cannot avoid it as we have no means to know if the old FK joined or not
+//                forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
+//            }
+//
+//            // for all cases, insert, update, and delete, we send a new subscription
+//            // we need to get a response back for all cases to always produce a left-join result
+//            //
+//            // note: for delete, `newForeignKey` is null, what is a "hack"
+//            // no actual subscription will be added for null-FK, but we still get the response back we need
+//            //
+//            // this may lead to unnecessary tombstones, if we delete an existing key,
+//            // which did not join previously;
+//            // however, we cannot avoid it as we have no means to know if the old FK joined or not
+//            forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
 
 
 
@@ -238,23 +249,9 @@ public class SubscriptionSendProcessorSupplier<KLeft, VLeft, KRight>
 //                forward(record, null, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
 //           }
 
-            // KAFKA-18713 fix
-//            if (record.value().oldValue != null) {
-//                final KRight oldForeignKey = foreignKeyExtractor.extract(record.key(), record.value().oldValue);
-//                final KRight newForeignKey = record.value().newValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().newValue);
-//                if (oldForeignKey != null && !Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
-//                    //forward(record, oldForeignKey, DELETE_KEY_AND_PROPAGATE); // original
-//                    forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE); // fix
-//                }
-//                forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
-//            } else if (record.value().newValue != null) {
-//                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), record.value().newValue);
-//                forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
-//            }
-
             // -------------------------------------------
 
-//            // KAFKA-16394 fix
+//            // K16394 fix
 //            if (record.value().oldValue != null) {
 //                final KRight oldForeignKey = foreignKeyExtractor.extract(record.key(), record.value().oldValue);
 //                final KRight newForeignKey = record.value().newValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().newValue);
@@ -266,13 +263,27 @@ public class SubscriptionSendProcessorSupplier<KLeft, VLeft, KRight>
 //                    forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE);
 //                    forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
 //                } else {
-//                    // fix unnecessary idempotent update bug by removing this case
-//                    //forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+//                    forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
 //                }
 //            } else if (record.value().newValue != null) {
 //                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), record.value().newValue);
 //                forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
 //            }
+
+            // -------------------------------------------
+
+            // original
+            if (record.value().oldValue != null) {
+                final KRight oldForeignKey = foreignKeyExtractor.extract(record.key(), record.value().oldValue);
+                final KRight newForeignKey = record.value().newValue == null ? null : foreignKeyExtractor.extract(record.key(), record.value().newValue);
+                if (oldForeignKey != null && !Arrays.equals(serialize(newForeignKey), serialize(oldForeignKey))) {
+                    forward(record, oldForeignKey, DELETE_KEY_NO_PROPAGATE); // K18713 fix
+                }
+                forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+            } else if (record.value().newValue != null) {
+                final KRight newForeignKey = foreignKeyExtractor.extract(record.key(), record.value().newValue);
+                forward(record, newForeignKey, PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE);
+            }
         }
 
         private void defaultJoinInstructions(final Record<KLeft, Change<VLeft>> record) {
