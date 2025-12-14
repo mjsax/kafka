@@ -16,10 +16,13 @@
  */
 package org.apache.kafka.streams.processor.api;
 
+import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.common.utils.Bytes;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.StreamsMetrics;
@@ -33,11 +36,20 @@ import org.apache.kafka.streams.processor.StateRestoreCallback;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.processor.internals.ClientUtils;
+import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
+import org.apache.kafka.streams.processor.internals.ProcessorMetadata;
+import org.apache.kafka.streams.processor.internals.ProcessorNode;
+import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
 import org.apache.kafka.streams.processor.internals.RecordCollector;
+import org.apache.kafka.streams.processor.internals.StreamTask;
+import org.apache.kafka.streams.processor.internals.Task;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.processor.internals.metrics.TaskMetrics;
+import org.apache.kafka.streams.query.Position;
 import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
+import org.apache.kafka.streams.state.internals.ThreadCache;
 
 import java.io.File;
 import java.time.Duration;
@@ -493,64 +505,241 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
      * @return a {@link StateStoreContext} that delegates to this ProcessorContext.
      */
     public StateStoreContext getStateStoreContext() {
-        return new StateStoreContext() {
-            @Override
-            public String applicationId() {
-                return MockProcessorContext.this.applicationId();
-            }
+        return new StateStoreContextAsInternalProcessorContext();
+    }
 
-            @Override
-            public TaskId taskId() {
-                return MockProcessorContext.this.taskId();
-            }
+    private class StateStoreContextAsInternalProcessorContext implements InternalProcessorContext<KForward, VForward> {
+        private ProcessorRecordContext processorRecordContext;
+        private ProcessorMetadata processorMetadata;
 
-            @Override
-            public Optional<RecordMetadata> recordMetadata() {
-                return MockProcessorContext.this.recordMetadata();
-            }
+        @Override
+        public <K extends KForward, V extends VForward> void forward(final FixedKeyRecord<K, V> record) {
+            throw new UnsupportedOperationException("Cannot call forward() on StateStoreContext");
+        }
 
-            @Override
-            public Serde<?> keySerde() {
-                return MockProcessorContext.this.keySerde();
-            }
+        @Override
+        public <K extends KForward, V extends VForward> void forward(final FixedKeyRecord<K, V> record, final String childName) {
+            throw new UnsupportedOperationException("Cannot call forward() on StateStoreContext");
+        }
 
-            @Override
-            public Serde<?> valueSerde() {
-                return MockProcessorContext.this.valueSerde();
-            }
+        @Override
+        public <K extends KForward, V extends VForward> void forward(final Record<K, V> record) {
+            throw new UnsupportedOperationException("Cannot call forward() on StateStoreContext");
+        }
 
-            @Override
-            public File stateDir() {
-                return MockProcessorContext.this.stateDir();
-            }
+        @Override
+        public <K extends KForward, V extends VForward> void forward(final Record<K, V> record, final String childName) {
+            throw new UnsupportedOperationException("Cannot call forward() on StateStoreContext");
+        }
 
-            @Override
-            public StreamsMetrics metrics() {
-                return MockProcessorContext.this.metrics();
-            }
+        @Override
+        public String applicationId() {
+            return MockProcessorContext.this.applicationId();
+        }
 
-            @Override
-            public void register(final StateStore store,
-                                 final StateRestoreCallback stateRestoreCallback) {
-                register(store, stateRestoreCallback, () -> { });
-            }
+        @Override
+        public TaskId taskId() {
+            return MockProcessorContext.this.taskId();
+        }
 
-            @Override
-            public void register(final StateStore store,
-                                 final StateRestoreCallback stateRestoreCallback,
-                                 final CommitCallback checkpoint) {
-                stateStores.put(store.name(), store);
-            }
+        @Override
+        public Optional<RecordMetadata> recordMetadata() {
+            return MockProcessorContext.this.recordMetadata();
+        }
 
-            @Override
-            public Map<String, Object> appConfigs() {
-                return MockProcessorContext.this.appConfigs();
-            }
+        @Override
+        public Serde<?> keySerde() {
+            return MockProcessorContext.this.keySerde();
+        }
 
-            @Override
-            public Map<String, Object> appConfigsWithPrefix(final String prefix) {
-                return MockProcessorContext.this.appConfigsWithPrefix(prefix);
-            }
-        };
+        @Override
+        public Serde<?> valueSerde() {
+            return MockProcessorContext.this.valueSerde();
+        }
+
+        @Override
+        public File stateDir() {
+            return MockProcessorContext.this.stateDir();
+        }
+
+        @Override
+        public StreamsMetricsImpl metrics() {
+            return metrics;
+        }
+
+        @Override
+        public void setSystemTimeMs(final long timeMs) {
+            throw new UnsupportedOperationException("Cannot call setSystemTime() on StateStoreContext");
+        }
+
+        @Override
+        public ProcessorRecordContext recordContext() {
+            return processorRecordContext;
+        }
+
+        @Override
+        public void setRecordContext(final ProcessorRecordContext recordContext) {
+            this.processorRecordContext = recordContext;
+        }
+
+        @Override
+        public ProcessorNode<?, ?, ?, ?> currentNode() {
+            throw new UnsupportedOperationException("Cannot call currentNode() on StateStoreContext");
+        }
+
+        @Override
+        public ThreadCache cache() {
+            return new ThreadCache(new LogContext(), 0L, metrics);
+        }
+
+        @Override
+        public void initialize() { /* no-op */ }
+
+        @Override
+        public void uninitialize() { /* no-op */ }
+
+        @Override
+        public Task.TaskType taskType() {
+            throw new UnsupportedOperationException("Cannot call taskType() on StateStoreContext");
+        }
+
+        @Override
+        public void transitionToActive(final StreamTask streamTask, final RecordCollector recordCollector, final ThreadCache newCache) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void transitionToStandby(final ThreadCache newCache) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void registerCacheFlushListener(final String namespace, final ThreadCache.DirtyEntryFlushListener listener) {
+            /* no-op */
+        }
+
+        @Override
+        public void logChange(final String storeName, final Bytes key, final byte[] value, final long timestamp, final Position position) {
+            /* no-op */
+        }
+
+        @Override
+        public String changelogFor(final String storeName) {
+            return storeName + "-" + taskId.partition() + "-changelog";
+        }
+
+        @Override
+        public void addProcessorMetadataKeyValue(final String key, final long value) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Long processorMetadataForKey(final String key) {
+            throw new UnsupportedOperationException("Cannot call processorMetadataForKey() on StateStoreContext");
+        }
+
+        @Override
+        public void setProcessorMetadata(final ProcessorMetadata metadata) {
+            this.processorMetadata = metadata;
+        }
+
+        @Override
+        public ProcessorMetadata processorMetadata() {
+            return processorMetadata;
+        }
+
+        @SuppressWarnings("rawtypes")
+        @Override
+        public void setCurrentNode(final ProcessorNode currentNode) {
+            throw new UnsupportedOperationException("Cannot call setCurrentNode() on StateStoreContext");
+        }
+
+        @Override
+        public void register(final StateStore store,
+                             final StateRestoreCallback stateRestoreCallback) {
+            register(store, stateRestoreCallback, () -> { });
+        }
+
+        @Override
+        public Cancellable schedule(final Duration interval, final PunctuationType type, final Punctuator callback) {
+            throw new UnsupportedOperationException("Cannot call schedule() on StateStoreContext");
+        }
+
+        @Override
+        public Cancellable schedule(final Instant startTime, final Duration interval, final PunctuationType type, final Punctuator callback) {
+            throw new UnsupportedOperationException("Cannot call schedule() on StateStoreContext");
+        }
+
+        @Override
+        public void forward(final Object key, final Object value, final To to) {
+            throw new UnsupportedOperationException("Cannot call forward() on StateStoreContext");
+        }
+
+        @Override
+        public void forward(final Object key, final Object value) {
+            throw new UnsupportedOperationException("Cannot call forward() on StateStoreContext");
+        }
+
+        @Override
+        public void commit() {
+            MockProcessorContext.this.commit();
+        }
+
+        @Override
+        public String topic() {
+            throw new IllegalStateException("Cannot call topic() on StateStoreContext");
+        }
+
+        @Override
+        public int partition() {
+            throw new IllegalStateException("Cannot call partition() on StateStoreContext");
+        }
+
+        @Override
+        public long offset() {
+            throw new IllegalStateException("Cannot call offset() on StateStoreContext");
+        }
+
+        @Override
+        public Headers headers() {
+            throw new IllegalStateException("Cannot call headers() on StateStoreContext");
+        }
+
+        @Override
+        public long timestamp() {
+            throw new IllegalStateException("Cannot call timestamp() on StateStoreContext");
+        }
+
+        @Override
+        public <S extends StateStore> S getStateStore(final String name) {
+            return MockProcessorContext.this.getStateStore(name);
+        }
+
+        @Override
+        public void register(final StateStore store,
+                             final StateRestoreCallback stateRestoreCallback,
+                             final CommitCallback checkpoint) {
+            stateStores.put(store.name(), store);
+        }
+
+        @Override
+        public Map<String, Object> appConfigs() {
+            return MockProcessorContext.this.appConfigs();
+        }
+
+        @Override
+        public Map<String, Object> appConfigsWithPrefix(final String prefix) {
+            return MockProcessorContext.this.appConfigsWithPrefix(prefix);
+        }
+
+        @Override
+        public long currentSystemTimeMs() {
+            return MockProcessorContext.this.currentSystemTimeMs();
+        }
+
+        @Override
+        public long currentStreamTimeMs() {
+            return MockProcessorContext.this.currentStreamTimeMs();
+        }
     }
 }
