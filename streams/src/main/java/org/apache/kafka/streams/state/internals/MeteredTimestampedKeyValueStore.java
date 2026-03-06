@@ -222,11 +222,10 @@ public class MeteredTimestampedKeyValueStore<K, V>
                 wrapped().query(rawRangeQuery, positionBound, config);
         if (rawResult.isSuccess()) {
             final KeyValueIterator<Bytes, byte[]> iterator = rawResult.getResult();
-            final KeyValueIterator<K, ValueAndTimestamp<V>> resultIterator = (KeyValueIterator<K, ValueAndTimestamp<V>>) new MeteredTimestampedKeyValueStoreIterator(
+            final KeyValueIterator<K, ValueAndTimestamp<V>> resultIterator = new MeteredTimestampedKeyValueStoreIteratorValueAndTimestamp(
                     iterator,
                     getSensor,
-                    StoreQueryUtils.deserializeValue(serdes, wrapped()),
-                    false
+                    StoreQueryUtils.deserializeValue(serdes, wrapped())
             );
             final QueryResult<KeyValueIterator<K, ValueAndTimestamp<V>>> typedQueryResult =
                     InternalQueryResultUtil.copyAndSubstituteDeserializedResult(
@@ -288,11 +287,10 @@ public class MeteredTimestampedKeyValueStore<K, V>
                 wrapped().query(rawRangeQuery, positionBound, config);
         if (rawResult.isSuccess()) {
             final KeyValueIterator<Bytes, byte[]> iterator = rawResult.getResult();
-            final KeyValueIterator<K, V> resultIterator = new MeteredTimestampedKeyValueStoreIterator(
+            final KeyValueIterator<K, V> resultIterator = new MeteredTimestampedKeyValueStoreIteratorPlainValue(
                 iterator,
                 getSensor,
-                StoreQueryUtils.deserializeValue(serdes, wrapped()),
-                true
+                StoreQueryUtils.deserializeValue(serdes, wrapped())
             );
             final QueryResult<KeyValueIterator<K, V>> typedQueryResult =
                     InternalQueryResultUtil.copyAndSubstituteDeserializedResult(
@@ -307,27 +305,49 @@ public class MeteredTimestampedKeyValueStore<K, V>
         return result;
     }
 
-    @SuppressWarnings("unchecked")
-    private class MeteredTimestampedKeyValueStoreIterator implements KeyValueIterator<K, V>, MeteredIterator {
+    private class MeteredTimestampedKeyValueStoreIteratorPlainValue extends MeteredTimestampedKeyValueStoreIterator<V> {
+        private final Function<byte[], ValueAndTimestamp<V>> valueAndTimestampDeserializer;
+
+        private MeteredTimestampedKeyValueStoreIteratorPlainValue(KeyValueIterator<Bytes, byte[]> iter, Sensor sensor, Function<byte[], ValueAndTimestamp<V>> valueAndTimestampDeserializer) {
+            super(iter, sensor);
+
+            this.valueAndTimestampDeserializer = valueAndTimestampDeserializer;
+        }
+
+        @Override
+        public V nextValue(final byte[] rawValueAndTimestamp) {
+            return valueAndTimestampDeserializer.apply(rawValueAndTimestamp).value();
+        }
+    }
+
+    private class MeteredTimestampedKeyValueStoreIteratorValueAndTimestamp extends MeteredTimestampedKeyValueStoreIterator<ValueAndTimestamp<V>> {
+        private final Function<byte[], ValueAndTimestamp<V>> valueAndTimestampDeserializer;
+
+        private MeteredTimestampedKeyValueStoreIteratorValueAndTimestamp(KeyValueIterator<Bytes, byte[]> iter, Sensor sensor, Function<byte[], ValueAndTimestamp<V>> valueAndTimestampDeserializer) {
+            super(iter, sensor);
+
+            this.valueAndTimestampDeserializer = valueAndTimestampDeserializer;
+        }
+
+        @Override
+        public ValueAndTimestamp<V> nextValue(final byte[] rawValueAndTimestamp) {
+            return valueAndTimestampDeserializer.apply(rawValueAndTimestamp);
+        }
+    }
+
+    private abstract class MeteredTimestampedKeyValueStoreIterator<ValueType> implements KeyValueIterator<K, ValueType>, MeteredIterator {
 
         private final KeyValueIterator<Bytes, byte[]> iter;
         private final Sensor sensor;
         private final long startNs;
         private final long startTimestampMs;
-        private final Function<byte[], ValueAndTimestamp<V>> valueAndTimestampDeserializer;
-
-        private final boolean returnPlainValue;
 
         private MeteredTimestampedKeyValueStoreIterator(final KeyValueIterator<Bytes, byte[]> iter,
-                                                        final Sensor sensor,
-                                                        final Function<byte[], ValueAndTimestamp<V>> valueAndTimestampDeserializer,
-                                                        final boolean returnPlainValue) {
+                                                        final Sensor sensor) {
             this.iter = iter;
             this.sensor = sensor;
-            this.valueAndTimestampDeserializer = valueAndTimestampDeserializer;
             this.startNs = time.nanoseconds();
             this.startTimestampMs = time.milliseconds();
-            this.returnPlainValue = returnPlainValue;
             openIterators.add(this);
         }
 
@@ -342,17 +362,17 @@ public class MeteredTimestampedKeyValueStore<K, V>
         }
 
         @Override
-        public KeyValue<K, V> next() {
+        public KeyValue<K, ValueType> next() {
             final KeyValue<Bytes, byte[]> keyValue = iter.next();
-            if (returnPlainValue) {
-                final V plainValue = valueAndTimestampDeserializer.apply(keyValue.value).value();
-                return KeyValue.pair(
-                        serdes.keyFrom(keyValue.key.get()), plainValue);
-            }
-            return (KeyValue<K, V>) KeyValue.pair(
-                    serdes.keyFrom(keyValue.key.get()),
-                    valueAndTimestampDeserializer.apply(keyValue.value));
+
+            return KeyValue.pair(
+                serdes.keyFrom(keyValue.key.get()),
+                nextValue(keyValue.value)
+            );
         }
+
+        abstract ValueType nextValue(final byte[] rawValue);
+
         @Override
         public void close() {
             try {
