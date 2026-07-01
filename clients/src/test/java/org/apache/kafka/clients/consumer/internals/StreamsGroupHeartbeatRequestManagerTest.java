@@ -92,6 +92,8 @@ class StreamsGroupHeartbeatRequestManagerTest {
 
     private static final LogContext LOG_CONTEXT = new LogContext("test");
     private static final long RECEIVED_HEARTBEAT_INTERVAL_MS = 1200;
+    private static final int RECEIVED_TASK_OFFSET_INTERVAL_MS = 7000;
+    private static final long RECEIVED_ACCEPTABLE_RECOVERY_LAG = 4242;
     private static final int DEFAULT_MAX_POLL_INTERVAL_MS = 10000;
     private static final String GROUP_ID = "group-id";
     private static final String MEMBER_ID = "member-id";
@@ -1007,6 +1009,69 @@ class StreamsGroupHeartbeatRequestManagerTest {
     }
 
     @Test
+    public void testTaskOffsetsReportedForStandbyAndWarmupTasks() {
+        // Per KIP-1071, a member reports cumulative changelog offsets for all of its tasks with local state.
+        // Running active tasks are intentionally excluded (trivially caught up), but standby and warm-up tasks
+        // both carry local state, so a single heartbeat must report offsets for BOTH, not just the warm-up.
+        final StreamsRebalanceData.TaskId standbyTask = new StreamsRebalanceData.TaskId(SUBTOPOLOGY_NAME_1, 0);
+        final StreamsRebalanceData.TaskId warmupTask = new StreamsRebalanceData.TaskId(SUBTOPOLOGY_NAME_2, 0);
+
+        final Map<StreamsRebalanceData.TaskId, Long> offsets = Map.of(
+            standbyTask, 300L,
+            warmupTask, 950L
+        );
+        final Map<StreamsRebalanceData.TaskId, Long> endOffsets = Map.of(
+            standbyTask, 400L,
+            warmupTask, 1000L
+        );
+        final StreamsRebalanceData rebalanceData = new StreamsRebalanceData(
+            PROCESS_ID,
+            Optional.of(ENDPOINT),
+            Optional.of(RACK_ID),
+            SUBTOPOLOGIES,
+            CLIENT_TAGS,
+            () -> offsets,
+            () -> endOffsets
+        );
+        rebalanceData.setReconciledAssignment(new StreamsRebalanceData.Assignment(
+            Set.of(),
+            Set.of(standbyTask),
+            Set.of(warmupTask),
+            true
+        ));
+        rebalanceData.setTaskOffsetIntervalMs(1000);
+        rebalanceData.setAcceptableRecoveryLag(100L);
+
+        final StreamsGroupHeartbeatRequestManager.HeartbeatState heartbeatState =
+            new StreamsGroupHeartbeatRequestManager.HeartbeatState(
+                rebalanceData,
+                membershipManager,
+                1234,
+                time
+            );
+        when(membershipManager.state()).thenReturn(MemberState.STABLE);
+
+        // First STABLE heartbeat: the assignment-changed trigger reports offsets for all reported tasks.
+        final StreamsGroupHeartbeatRequestData request = heartbeatState.buildRequestData();
+
+        final Map<StreamsRebalanceData.TaskId, Long> reportedOffsets = request.taskOffsets().stream()
+            .collect(Collectors.toMap(
+                t -> new StreamsRebalanceData.TaskId(t.subtopologyId(), t.partition()),
+                StreamsGroupHeartbeatRequestData.TaskOffset::offset
+            ));
+        assertEquals(300L, reportedOffsets.get(standbyTask));
+        assertEquals(950L, reportedOffsets.get(warmupTask));
+
+        final Map<StreamsRebalanceData.TaskId, Long> reportedEndOffsets = request.taskEndOffsets().stream()
+            .collect(Collectors.toMap(
+                t -> new StreamsRebalanceData.TaskId(t.subtopologyId(), t.partition()),
+                StreamsGroupHeartbeatRequestData.TaskOffset::offset
+            ));
+        assertEquals(400L, reportedEndOffsets.get(standbyTask));
+        assertEquals(1000L, reportedEndOffsets.get(warmupTask));
+    }
+
+    @Test
     public void testHotWarmupTaskDisabledWhenEndOffsetMissing() {
         // Without an end-offset entry for the warmup task, lag cannot be computed.
         // hasHotWarmupTask must return false (safe fallback) — the broker will still
@@ -1305,6 +1370,68 @@ class StreamsGroupHeartbeatRequestManagerTest {
         final StreamsGroupHeartbeatRequestData followUp = heartbeatState.buildRequestData();
         assertNull(followUp.taskOffsets());
         assertNull(followUp.taskEndOffsets());
+    }
+
+    @Test
+    public void testTaskOffsetReportingCadenceConditionsInterplay() {
+        // Stages the three task-offset reporting conditions in one sequence to validate their interplay
+        // (not just in isolation):
+        //   (1) report only if the offsets changed since the last heartbeat;
+        //   (2) when NOT "hot" (warm-up lag above acceptable.recovery.lag), report only when
+        //       task.offset.interval.ms has elapsed (not on every heartbeat);
+        //   (3) when "hot" (warm-up lag at/below acceptable.recovery.lag), report on every heartbeat,
+        //       without waiting for the interval -- but condition (1) still applies (unchanged => not sent).
+        final StreamsRebalanceData.TaskId warmup = new StreamsRebalanceData.TaskId(SUBTOPOLOGY_NAME_1, 0);
+        final AtomicReference<Map<StreamsRebalanceData.TaskId, Long>> offsets =
+            new AtomicReference<>(Map.of(warmup, 500L)); // lag = 1000 - 500 = 500 > 100 -> not hot
+        final Map<StreamsRebalanceData.TaskId, Long> endOffsets = Map.of(warmup, 1000L);
+        final StreamsRebalanceData rebalanceData = new StreamsRebalanceData(
+            PROCESS_ID,
+            Optional.of(ENDPOINT),
+            Optional.of(RACK_ID),
+            SUBTOPOLOGIES,
+            CLIENT_TAGS,
+            offsets::get,
+            () -> endOffsets
+        );
+        rebalanceData.setReconciledAssignment(new StreamsRebalanceData.Assignment(
+            Set.of(),
+            Set.of(),
+            Set.of(warmup),
+            true
+        ));
+        rebalanceData.setTaskOffsetIntervalMs(1000);
+        rebalanceData.setAcceptableRecoveryLag(100L);
+
+        final StreamsGroupHeartbeatRequestManager.HeartbeatState heartbeatState =
+            new StreamsGroupHeartbeatRequestManager.HeartbeatState(rebalanceData, membershipManager, 1234, time);
+        when(membershipManager.state()).thenReturn(MemberState.STABLE);
+
+        // Baseline: first STABLE heartbeat sends offsets via the assignment-changed trigger.
+        assertEquals(500L, heartbeatState.buildRequestData().taskOffsets().get(0).offset());
+
+        // (1) not hot, unchanged, interval not elapsed -> not sent.
+        assertNull(heartbeatState.buildRequestData().taskOffsets());
+
+        // (2) negative: not hot, CHANGED, but interval not elapsed -> still not sent.
+        offsets.set(Map.of(warmup, 550L)); // lag = 450 > 100 -> not hot
+        time.sleep(500); // < task.offset.interval.ms (1000)
+        assertNull(heartbeatState.buildRequestData().taskOffsets());
+
+        // (2) positive: not hot, changed, interval now elapsed -> sent.
+        time.sleep(500); // total 1000 since last send -> interval passed
+        assertEquals(550L, heartbeatState.buildRequestData().taskOffsets().get(0).offset());
+
+        // (3) hot, changed, interval NOT elapsed -> sent immediately (hot trigger).
+        offsets.set(Map.of(warmup, 950L)); // lag = 50 <= 100 -> hot
+        assertEquals(950L, heartbeatState.buildRequestData().taskOffsets().get(0).offset());
+
+        // (3) + (1): hot but unchanged, interval not elapsed -> not sent (changed-gate still applies).
+        assertNull(heartbeatState.buildRequestData().taskOffsets());
+
+        // (3) again: hot and changed, interval not elapsed -> sent again (every heartbeat while hot and progressing).
+        offsets.set(Map.of(warmup, 980L)); // lag = 20 <= 100 -> still hot
+        assertEquals(980L, heartbeatState.buildRequestData().taskOffsets().get(0).offset());
     }
 
     private StreamsRebalanceData newRebalanceDataWithStandbyOffsets(
@@ -2287,6 +2414,58 @@ class StreamsGroupHeartbeatRequestManagerTest {
     }
 
     @Test
+    public void testStreamsRebalanceDataTaskOffsetIntervalMsUpdatedOnSuccess() {
+        try (final MockedConstruction<HeartbeatRequestState> ignored = mockConstruction(
+            HeartbeatRequestState.class,
+            (mock, context) -> when(mock.canSendRequest(time.milliseconds())).thenReturn(true)
+        )) {
+            final StreamsGroupHeartbeatRequestManager heartbeatRequestManager = createStreamsGroupHeartbeatRequestManager();
+            when(coordinatorRequestManager.coordinator()).thenReturn(Optional.of(coordinatorNode));
+            when(membershipManager.groupId()).thenReturn(GROUP_ID);
+            when(membershipManager.memberId()).thenReturn(MEMBER_ID);
+            when(membershipManager.memberEpoch()).thenReturn(MEMBER_EPOCH);
+            when(membershipManager.groupInstanceId()).thenReturn(Optional.of(INSTANCE_ID));
+
+            // The broker returns task.offset.interval.ms (KAFKA-18652) so the client knows how often to report
+            // task changelog offsets; the client must store it in StreamsRebalanceData.
+            assertEquals(-1, streamsRebalanceData.taskOffsetIntervalMs());
+
+            final NetworkClientDelegate.PollResult result = heartbeatRequestManager.poll(time.milliseconds());
+            assertEquals(1, result.unsentRequests.size());
+
+            result.unsentRequests.get(0).handler().onComplete(buildClientResponse());
+
+            assertEquals(RECEIVED_TASK_OFFSET_INTERVAL_MS, streamsRebalanceData.taskOffsetIntervalMs());
+        }
+    }
+
+    @Test
+    public void testStreamsRebalanceDataAcceptableRecoveryLagUpdatedOnSuccess() {
+        try (final MockedConstruction<HeartbeatRequestState> ignored = mockConstruction(
+            HeartbeatRequestState.class,
+            (mock, context) -> when(mock.canSendRequest(time.milliseconds())).thenReturn(true)
+        )) {
+            final StreamsGroupHeartbeatRequestManager heartbeatRequestManager = createStreamsGroupHeartbeatRequestManager();
+            when(coordinatorRequestManager.coordinator()).thenReturn(Optional.of(coordinatorNode));
+            when(membershipManager.groupId()).thenReturn(GROUP_ID);
+            when(membershipManager.memberId()).thenReturn(MEMBER_ID);
+            when(membershipManager.memberEpoch()).thenReturn(MEMBER_EPOCH);
+            when(membershipManager.groupInstanceId()).thenReturn(Optional.of(INSTANCE_ID));
+
+            // The broker returns acceptable.recovery.lag (KAFKA-18652) so the client can decide when a warm-up is
+            // caught up; the client must store it in StreamsRebalanceData.
+            assertEquals(-1, streamsRebalanceData.acceptableRecoveryLag());
+
+            final NetworkClientDelegate.PollResult result = heartbeatRequestManager.poll(time.milliseconds());
+            assertEquals(1, result.unsentRequests.size());
+
+            result.unsentRequests.get(0).handler().onComplete(buildClientResponse());
+
+            assertEquals(RECEIVED_ACCEPTABLE_RECOVERY_LAG, streamsRebalanceData.acceptableRecoveryLag());
+        }
+    }
+
+    @Test
     public void testStreamsRebalanceDataTopologyPushRequiredSetOnRequiredTrue() {
         try (
             final MockedConstruction<HeartbeatRequestState> ignored = mockConstruction(
@@ -2378,6 +2557,8 @@ class StreamsGroupHeartbeatRequestManagerTest {
                 new StreamsGroupHeartbeatResponseData()
                     .setPartitionsByUserEndpoint(ENDPOINT_TO_PARTITIONS)
                     .setHeartbeatIntervalMs((int) RECEIVED_HEARTBEAT_INTERVAL_MS)
+                    .setTaskOffsetIntervalMs(RECEIVED_TASK_OFFSET_INTERVAL_MS)
+                    .setAcceptableRecoveryLag(RECEIVED_ACCEPTABLE_RECOVERY_LAG)
             )
         );
     }
