@@ -24,6 +24,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.internals.StreamsGroupHeartbeatRequestManager;
 import org.apache.kafka.clients.consumer.internals.StreamsRebalanceData;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -32,6 +33,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.common.utils.LogCaptureAppender;
 import org.apache.kafka.coordinator.group.GroupCoordinatorConfig;
 import org.apache.kafka.coordinator.group.streams.assignor.AssignmentMemberSpec;
 import org.apache.kafka.coordinator.group.streams.assignor.GroupAssignment;
@@ -57,6 +59,7 @@ import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
 import org.apache.kafka.test.TestUtils;
 
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -198,82 +201,92 @@ public class StreamsGroupAssignorE2ETest {
         final int recordsP1 = 6;
         produceControlledInput(recordsP0, recordsP1);
 
-        final KafkaStreams instanceA = startStreams(builder);
-        final KafkaStreams instanceB = startStreams(builder);
-        waitForRunning(instanceA);
-        waitForRunning(instanceB);
+        // Capture the client's heartbeat-response logging BEFORE any instance starts, so we can verify the response
+        // leg (the configs the coordinator sends back) without reflecting into client internals. The client logs the
+        // received config on first receipt.
+        try (final LogCaptureAppender hbLog =
+                 LogCaptureAppender.createAndRegister(StreamsGroupHeartbeatRequestManager.class)) {
+            hbLog.setClassLogger(StreamsGroupHeartbeatRequestManager.class, Level.INFO);
 
-        final String changelogTopic = applicationId + "-" + STORE_NAME + "-changelog";
+            final KafkaStreams instanceA = startStreams(builder);
+            final KafkaStreams instanceB = startStreams(builder);
+            waitForRunning(instanceA);
+            waitForRunning(instanceB);
 
-        // Each record is one changelog write, so the changelog end offset of partition p equals the number of
-        // records produced to input partition p. The two standby tasks (one per partition, on the two instances)
-        // restore these changelogs and report offsets keyed by task (subtopology, partition).
-        final Map<Integer, Long> expectedChangelogEnd = Map.of(0, (long) recordsP0, 1, (long) recordsP1);
+            final String changelogTopic = applicationId + "-" + STORE_NAME + "-changelog";
 
-        // Wait until the changelog is fully produced (deterministic end offsets, no processing race).
-        TestUtils.waitForCondition(
-            () -> changelogEnds(changelogTopic).equals(expectedChangelogEnd),
-            120_000,
-            "Changelog never reached the expected end offsets " + expectedChangelogEnd + "."
-        );
+            // Each record is one changelog write, so the changelog end offset of partition p equals the number of
+            // records produced to input partition p. The two standby tasks (one per partition, on the two instances)
+            // restore these changelogs and report offsets keyed by task (subtopology, partition).
+            final Map<Integer, Long> expectedChangelogEnd = Map.of(0, (long) recordsP0, 1, (long) recordsP1);
 
-        // Wait until BOTH standby tasks have fully restored and reported, then assert the reported offsets are
-        // deterministic and matched to the correct task/partition.
-        //
-        // NOTE (off-by-one, intended for now -- TODO investigate): taskOffsetSum is the changelog *position*
-        // (log-end-offset = record count N), while taskEndOffsetSum is the *last* offset (N-1). So a fully
-        // caught-up task reports offset == N and endOffset == N-1 (assignor lag endOffset-offset = -1). The two
-        // values come from different code paths (StateDirectory.taskOffsetSums vs logicalChangelogEndOffsets) with
-        // different offset conventions; harmless against acceptable.recovery.lag but worth revisiting.
-        // Reported offsets don't bump the group epoch, so the assignor is only re-invoked on membership changes.
-        // Bounce a HIDDEN churn member (see CHURN_TAG) until a recompute captures a GroupSpec whose reported offsets
-        // show BOTH standby partitions caught up, then assert the exact values from that captured spec. Hiding the
-        // churn member keeps the two real members' standbys in place so they stay caught up — no broker-internal peeking.
-        final GroupSpec spec = churnUntilAssignorObserves(
-            builder,
-            capturingAssignor,
-            captured -> {
-                final Map<Integer, long[]> reported = reportedOffsetsByPartition(captured);
-                return matchesCaughtUp(reported.get(0), recordsP0) && matchesCaughtUp(reported.get(1), recordsP1);
-            },
-            "Both standby tasks did not report deterministic caught-up offsets matched to their changelog partitions.",
-            CHURN_MEMBER_PROPS
-        );
+            // Wait until the changelog is fully produced (deterministic end offsets, no processing race).
+            TestUtils.waitForCondition(
+                () -> changelogEnds(changelogTopic).equals(expectedChangelogEnd),
+                120_000,
+                "Changelog never reached the expected end offsets " + expectedChangelogEnd + "."
+            );
 
-        final Map<Integer, long[]> reported = reportedOffsetsByPartition(spec);
-        for (final int partition : new int[] {0, 1}) {
-            final long expectedRecords = partition == 0 ? recordsP0 : recordsP1;
-            final long[] offsetAndEnd = reported.get(partition);
-            assertNotNull(offsetAndEnd, "No reported offsets for the standby task of partition " + partition + ".");
-            assertEquals(expectedRecords, offsetAndEnd[0],
-                "Reported taskOffsetSum for partition " + partition + " must equal the changelog position.");
-            assertEquals(expectedRecords - 1, offsetAndEnd[1],
-                "Reported taskEndOffsetSum for partition " + partition + " must equal the changelog last offset.");
+            // Wait until BOTH standby tasks have fully restored and reported, then assert the reported offsets are
+            // deterministic and matched to the correct task/partition.
+            //
+            // NOTE (off-by-one, intended for now -- TODO investigate): taskOffsetSum is the changelog *position*
+            // (log-end-offset = record count N), while taskEndOffsetSum is the *last* offset (N-1). So a fully
+            // caught-up task reports offset == N and endOffset == N-1 (assignor lag endOffset-offset = -1). The two
+            // values come from different code paths (StateDirectory.taskOffsetSums vs logicalChangelogEndOffsets) with
+            // different offset conventions; harmless against acceptable.recovery.lag but worth revisiting.
+            // Reported offsets don't bump the group epoch, so the assignor is only re-invoked on membership changes.
+            // Bounce a HIDDEN churn member (see CHURN_TAG) until a recompute captures a GroupSpec whose reported offsets
+            // show BOTH standby partitions caught up, then assert the exact values from that captured spec. Hiding the
+            // churn member keeps the two real members' standbys in place so they stay caught up — no broker-internal peeking.
+            final GroupSpec spec = churnUntilAssignorObserves(
+                builder,
+                capturingAssignor,
+                captured -> {
+                    final Map<Integer, long[]> reported = reportedOffsetsByPartition(captured);
+                    return matchesCaughtUp(reported.get(0), recordsP0) && matchesCaughtUp(reported.get(1), recordsP1);
+                },
+                "Both standby tasks did not report deterministic caught-up offsets matched to their changelog partitions.",
+                CHURN_MEMBER_PROPS
+            );
+
+            final Map<Integer, long[]> reported = reportedOffsetsByPartition(spec);
+            for (final int partition : new int[] {0, 1}) {
+                final long expectedRecords = partition == 0 ? recordsP0 : recordsP1;
+                final long[] offsetAndEnd = reported.get(partition);
+                assertNotNull(offsetAndEnd, "No reported offsets for the standby task of partition " + partition + ".");
+                assertEquals(expectedRecords, offsetAndEnd[0],
+                    "Reported taskOffsetSum for partition " + partition + " must equal the changelog position.");
+                assertEquals(expectedRecords - 1, offsetAndEnd[1],
+                    "Reported taskEndOffsetSum for partition " + partition + " must equal the changelog last offset.");
+            }
+
+            // Member metadata is forwarded to the assignor too. Pick a member reporting offsets (a real member, never
+            // the empty hidden churn member) and check its process id is present.
+            final AssignmentMemberSpec memberWithOffsets = spec.members().values().stream()
+                .filter(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty())
+                .findFirst()
+                .orElseThrow();
+            assertFalse(memberWithOffsets.processId().isEmpty(), "Expected a process id on the member spec.");
+
+            // Broker config reached the assignor via the assignment configs.
+            assertEquals(
+                Integer.toString(NUM_STANDBY_REPLICAS),
+                spec.assignmentConfigs().get("num.standby.replicas"),
+                "Expected num.standby.replicas to reach the assignor via assignmentConfigs."
+            );
+
+            // Response leg: the client logged the configs the coordinator sent back (observed via the log, not by
+            // reflecting into client-internal StreamsRebalanceData).
+            TestUtils.waitForCondition(
+                () -> hbLog.getMessages().stream().anyMatch(m ->
+                    m.contains("heartbeatIntervalMs=" + HEARTBEAT_INTERVAL_MS)
+                        && m.contains("taskOffsetIntervalMs=" + TASK_OFFSET_INTERVAL_MS)
+                        && m.contains("acceptableRecoveryLag=" + ACCEPTABLE_RECOVERY_LAG)),
+                120_000,
+                "Client never logged the Streams group config received from the coordinator."
+            );
         }
-
-        // Member metadata is forwarded to the assignor too. Pick a member reporting offsets (a real member, never the
-        // empty hidden churn member) and check its process id is present.
-        final AssignmentMemberSpec memberWithOffsets = spec.members().values().stream()
-            .filter(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty())
-            .findFirst()
-            .orElseThrow();
-        assertFalse(memberWithOffsets.processId().isEmpty(), "Expected a process id on the member spec.");
-
-        // Broker config reached the assignor via the assignment configs.
-        assertEquals(
-            Integer.toString(NUM_STANDBY_REPLICAS),
-            spec.assignmentConfigs().get("num.standby.replicas"),
-            "Expected num.standby.replicas to reach the assignor via assignmentConfigs."
-        );
-
-        // Response leg: the client stored the configs the broker sent back.
-        final StreamsRebalanceData rebalanceData = Reflection.streamsRebalanceData(instanceA);
-        assertEquals(HEARTBEAT_INTERVAL_MS, rebalanceData.heartbeatIntervalMs(),
-            "Client did not store the broker's heartbeat interval.");
-        assertEquals(TASK_OFFSET_INTERVAL_MS, rebalanceData.taskOffsetIntervalMs(),
-            "Client did not store the broker's task-offset interval.");
-        assertEquals(ACCEPTABLE_RECOVERY_LAG, rebalanceData.acceptableRecoveryLag(),
-            "Client did not store the broker's acceptable recovery lag.");
     }
 
     /** Collapses a captured spec's per-member reported offsets to partition -> [taskOffsetSum, taskEndOffsetSum]. */
@@ -940,18 +953,6 @@ public class StreamsGroupAssignorE2ETest {
                 }
             }
             return gmms;
-        }
-
-        static StreamsRebalanceData streamsRebalanceData(final KafkaStreams streams) throws Exception {
-            final Field threadsField = field(streams, "threads");
-            final List<?> threads = (List<?>) threadsField.get(streams);
-            for (final Object thread : threads) {
-                final Object maybeData = field(thread, "streamsRebalanceData").get(thread);
-                if (maybeData instanceof java.util.Optional<?> opt && opt.isPresent()) {
-                    return (StreamsRebalanceData) opt.get();
-                }
-            }
-            throw new AssertionError("No StreamThread held a StreamsRebalanceData; is the streams protocol enabled?");
         }
 
         private static Field field(final Object target, final String name) throws NoSuchFieldException {

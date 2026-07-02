@@ -43,6 +43,7 @@ import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
 import org.apache.kafka.common.utils.internals.LogContext;
 
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -645,6 +646,135 @@ class StreamsGroupHeartbeatRequestManagerTest {
                 metrics.metric(metrics.metricName("heartbeat-total", "consumer-coordinator-metrics")).metricValue()
             );
         }
+    }
+
+    @Test
+    public void testLogsReceivedGroupConfigWhenAnyValueChanges() {
+        try (
+            final MockedConstruction<HeartbeatRequestState> heartbeatRequestStateMockedConstruction = mockConstruction(
+                HeartbeatRequestState.class,
+                (mock, context) -> when(mock.canSendRequest(time.milliseconds())).thenReturn(true));
+            final LogCaptureAppender logAppender = LogCaptureAppender.createAndRegister(StreamsGroupHeartbeatRequestManager.class)
+        ) {
+            logAppender.setClassLogger(StreamsGroupHeartbeatRequestManager.class, Level.INFO);
+            final StreamsGroupHeartbeatRequestManager heartbeatRequestManager = createStreamsGroupHeartbeatRequestManager();
+            when(coordinatorRequestManager.coordinator()).thenReturn(Optional.of(coordinatorNode));
+            when(membershipManager.groupId()).thenReturn(GROUP_ID);
+            when(membershipManager.memberId()).thenReturn(MEMBER_ID);
+            when(membershipManager.memberEpoch()).thenReturn(MEMBER_EPOCH);
+            when(membershipManager.groupInstanceId()).thenReturn(Optional.of(INSTANCE_ID));
+
+            final int heartbeatIntervalMs = (int) RECEIVED_HEARTBEAT_INTERVAL_MS;
+            final int taskOffsetIntervalMs = RECEIVED_TASK_OFFSET_INTERVAL_MS;
+            final long acceptableRecoveryLag = RECEIVED_ACCEPTABLE_RECOVERY_LAG;
+
+            // First response: all three values change from their initial unset (-1) state, so they are logged.
+            completeSuccessfulHeartbeat(heartbeatRequestManager,
+                buildClientResponseWithConfig(heartbeatIntervalMs, taskOffsetIntervalMs, acceptableRecoveryLag));
+            assertEquals(1, countConfigLogs(logAppender), "Config should be logged on first receipt.");
+            assertTrue(logAppender.getMessages().stream().anyMatch(m -> m.contains(
+                    "heartbeatIntervalMs=" + heartbeatIntervalMs
+                        + ", taskOffsetIntervalMs=" + taskOffsetIntervalMs
+                        + ", acceptableRecoveryLag=" + acceptableRecoveryLag)),
+                "The logged message should contain the received config values.");
+
+            // Identical values: nothing changed, so it is NOT logged again.
+            completeSuccessfulHeartbeat(heartbeatRequestManager,
+                buildClientResponseWithConfig(heartbeatIntervalMs, taskOffsetIntervalMs, acceptableRecoveryLag));
+            assertEquals(1, countConfigLogs(logAppender), "Unchanged config must not be logged again.");
+
+            // Only heartbeatIntervalMs changes -> logged.
+            completeSuccessfulHeartbeat(heartbeatRequestManager,
+                buildClientResponseWithConfig(heartbeatIntervalMs + 1, taskOffsetIntervalMs, acceptableRecoveryLag));
+            assertEquals(2, countConfigLogs(logAppender), "A change to heartbeatIntervalMs must be logged.");
+            // Same values again -> not logged.
+            completeSuccessfulHeartbeat(heartbeatRequestManager,
+                buildClientResponseWithConfig(heartbeatIntervalMs + 1, taskOffsetIntervalMs, acceptableRecoveryLag));
+            assertEquals(2, countConfigLogs(logAppender));
+
+            // Only taskOffsetIntervalMs changes -> logged.
+            completeSuccessfulHeartbeat(heartbeatRequestManager,
+                buildClientResponseWithConfig(heartbeatIntervalMs + 1, taskOffsetIntervalMs + 1, acceptableRecoveryLag));
+            assertEquals(3, countConfigLogs(logAppender), "A change to taskOffsetIntervalMs must be logged.");
+
+            // Only acceptableRecoveryLag changes -> logged.
+            completeSuccessfulHeartbeat(heartbeatRequestManager,
+                buildClientResponseWithConfig(heartbeatIntervalMs + 1, taskOffsetIntervalMs + 1, acceptableRecoveryLag + 1));
+            assertEquals(4, countConfigLogs(logAppender), "A change to acceptableRecoveryLag must be logged.");
+        }
+    }
+
+    @Test
+    public void testLogsNotProvidedWhenOlderBrokerOmitsConfig() {
+        try (
+            final MockedConstruction<HeartbeatRequestState> heartbeatRequestStateMockedConstruction = mockConstruction(
+                HeartbeatRequestState.class,
+                (mock, context) -> when(mock.canSendRequest(time.milliseconds())).thenReturn(true));
+            final LogCaptureAppender logAppender = LogCaptureAppender.createAndRegister(StreamsGroupHeartbeatRequestManager.class)
+        ) {
+            logAppender.setClassLogger(StreamsGroupHeartbeatRequestManager.class, Level.INFO);
+            final StreamsGroupHeartbeatRequestManager heartbeatRequestManager = createStreamsGroupHeartbeatRequestManager();
+            when(coordinatorRequestManager.coordinator()).thenReturn(Optional.of(coordinatorNode));
+            when(membershipManager.groupId()).thenReturn(GROUP_ID);
+            when(membershipManager.memberId()).thenReturn(MEMBER_ID);
+            when(membershipManager.memberEpoch()).thenReturn(MEMBER_EPOCH);
+            when(membershipManager.groupInstanceId()).thenReturn(Optional.of(INSTANCE_ID));
+
+            // An older broker sets only heartbeatIntervalMs; taskOffsetIntervalMs arrives as 0 and acceptableRecoveryLag
+            // as -1. Those must be rendered as "not provided (older broker)" rather than the raw defaults.
+            completeSuccessfulHeartbeat(heartbeatRequestManager, buildClientResponseWithConfig(5000, 0, -1L));
+            assertTrue(logAppender.getMessages().stream().anyMatch(m -> m.contains(
+                    "heartbeatIntervalMs=5000, "
+                        + "taskOffsetIntervalMs=not provided (older broker), "
+                        + "acceptableRecoveryLag=not provided (older broker)")),
+                "An older broker's unset config should be logged as 'not provided (older broker)'.");
+        }
+    }
+
+    @Test
+    public void testDoesNotLogOrUpdateGroupConfigOnLeaveResponse() {
+        try (
+            final MockedConstruction<HeartbeatRequestState> heartbeatRequestStateMockedConstruction = mockConstruction(
+                HeartbeatRequestState.class,
+                (mock, context) -> when(mock.canSendRequest(time.milliseconds())).thenReturn(true));
+            final LogCaptureAppender logAppender = LogCaptureAppender.createAndRegister(StreamsGroupHeartbeatRequestManager.class)
+        ) {
+            logAppender.setClassLogger(StreamsGroupHeartbeatRequestManager.class, Level.INFO);
+            final StreamsGroupHeartbeatRequestManager heartbeatRequestManager = createStreamsGroupHeartbeatRequestManager();
+            when(coordinatorRequestManager.coordinator()).thenReturn(Optional.of(coordinatorNode));
+            when(membershipManager.groupId()).thenReturn(GROUP_ID);
+            when(membershipManager.memberId()).thenReturn(MEMBER_ID);
+            when(membershipManager.memberEpoch()).thenReturn(MEMBER_EPOCH);
+            when(membershipManager.groupInstanceId()).thenReturn(Optional.of(INSTANCE_ID));
+
+            // A normal response applies and logs the config once.
+            completeSuccessfulHeartbeat(heartbeatRequestManager, buildClientResponse());
+            assertEquals(1, countConfigLogs(logAppender));
+            assertEquals(RECEIVED_HEARTBEAT_INTERVAL_MS, streamsRebalanceData.heartbeatIntervalMs());
+            assertEquals(RECEIVED_TASK_OFFSET_INTERVAL_MS, streamsRebalanceData.taskOffsetIntervalMs());
+            assertEquals(RECEIVED_ACCEPTABLE_RECOVERY_LAG, streamsRebalanceData.acceptableRecoveryLag());
+
+            // A leave response (memberEpoch < 0) carries no real config; it must neither be logged again nor
+            // overwrite the stored config with the response's protocol defaults.
+            completeSuccessfulHeartbeat(heartbeatRequestManager, buildClientLeaveResponse());
+            assertEquals(1, countConfigLogs(logAppender), "A leave response must not log group config.");
+            assertEquals(RECEIVED_HEARTBEAT_INTERVAL_MS, streamsRebalanceData.heartbeatIntervalMs());
+            assertEquals(RECEIVED_TASK_OFFSET_INTERVAL_MS, streamsRebalanceData.taskOffsetIntervalMs());
+            assertEquals(RECEIVED_ACCEPTABLE_RECOVERY_LAG, streamsRebalanceData.acceptableRecoveryLag());
+        }
+    }
+
+    private static long countConfigLogs(final LogCaptureAppender logAppender) {
+        return logAppender.getMessages().stream()
+            .filter(m -> m.contains("Received Streams group configuration from the group coordinator:"))
+            .count();
+    }
+
+    private void completeSuccessfulHeartbeat(final StreamsGroupHeartbeatRequestManager heartbeatRequestManager,
+                                             final ClientResponse response) {
+        final NetworkClientDelegate.PollResult result = heartbeatRequestManager.poll(time.milliseconds());
+        assertEquals(1, result.unsentRequests.size());
+        result.unsentRequests.get(0).handler().onComplete(response);
     }
 
     @ParameterizedTest
@@ -2559,6 +2689,47 @@ class StreamsGroupHeartbeatRequestManagerTest {
                     .setHeartbeatIntervalMs((int) RECEIVED_HEARTBEAT_INTERVAL_MS)
                     .setTaskOffsetIntervalMs(RECEIVED_TASK_OFFSET_INTERVAL_MS)
                     .setAcceptableRecoveryLag(RECEIVED_ACCEPTABLE_RECOVERY_LAG)
+            )
+        );
+    }
+
+    // A successful (non-leave) response carrying specific group-config values.
+    private ClientResponse buildClientResponseWithConfig(final int heartbeatIntervalMs,
+                                                         final int taskOffsetIntervalMs,
+                                                         final long acceptableRecoveryLag) {
+        return new ClientResponse(
+            new RequestHeader(ApiKeys.STREAMS_GROUP_HEARTBEAT, (short) 1, "", 1),
+            null,
+            "-1",
+            time.milliseconds(),
+            time.milliseconds(),
+            false,
+            null,
+            null,
+            new StreamsGroupHeartbeatResponse(
+                new StreamsGroupHeartbeatResponseData()
+                    .setHeartbeatIntervalMs(heartbeatIntervalMs)
+                    .setTaskOffsetIntervalMs(taskOffsetIntervalMs)
+                    .setAcceptableRecoveryLag(acceptableRecoveryLag)
+            )
+        );
+    }
+
+    // A successful response to a leaving member: memberEpoch is negative and no group configuration is set, so the
+    // config fields carry their protocol defaults (as the coordinator sends for a leave).
+    private ClientResponse buildClientLeaveResponse() {
+        return new ClientResponse(
+            new RequestHeader(ApiKeys.STREAMS_GROUP_HEARTBEAT, (short) 1, "", 1),
+            null,
+            "-1",
+            time.milliseconds(),
+            time.milliseconds(),
+            false,
+            null,
+            null,
+            new StreamsGroupHeartbeatResponse(
+                new StreamsGroupHeartbeatResponseData()
+                    .setMemberEpoch(-1)
             )
         );
     }
