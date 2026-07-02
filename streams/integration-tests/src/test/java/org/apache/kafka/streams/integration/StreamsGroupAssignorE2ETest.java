@@ -75,6 +75,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 
@@ -192,18 +193,17 @@ public class StreamsGroupAssignorE2ETest {
         waitForRunning(instanceA);
         waitForRunning(instanceB);
 
-        TestUtils.waitForCondition(
-            () -> Reflection.brokerHasReportedBothOffsets(cluster, applicationId),
-            120_000,
-            "Broker never received both reported task offsets and end-offsets from any member."
+        // Reported offsets do not bump the group epoch, so the assignor is only re-invoked on membership changes.
+        // Bounce an extra member until a recompute captures a GroupSpec in which some member reports BOTH task offsets
+        // and end-offsets (they are reported independently). Everything is observed through the assignor input — no
+        // broker-internal peeking, so this still works once the assignor becomes pluggable.
+        final GroupSpec specWithOffsets = churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
+            spec -> spec.members().values().stream()
+                .anyMatch(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty()),
+            "The assignor was never invoked with a GroupSpec carrying reported task offsets and end-offsets."
         );
-
-        // Force a group-epoch bump (a new member) so the coordinator recomputes the target assignment and invokes
-        // our capturing assignor with the now-populated task offsets.
-        final KafkaStreams instanceC = startStreams(builder);
-        waitForRunning(instanceC);
-
-        final GroupSpec specWithOffsets = waitForCapturedSpecWithTaskOffsets(capturingAssignor);
 
         // Select the same member the wait gated on: one carrying BOTH offsets and end-offsets. taskOffsets and
         // taskEndOffsets are reported independently, so with multiple members another member may have only offsets
@@ -341,26 +341,15 @@ public class StreamsGroupAssignorE2ETest {
         waitForRunning(instanceA);
         waitForRunning(instanceB);
 
-        // With no standby replicas, the only tasks that report offsets are warm-ups (running actives are excluded
-        // and there are no standbys), so any reported offsets come from the forced warm-up.
-        TestUtils.waitForCondition(
-            () -> Reflection.brokerHasReportedBothOffsets(cluster, applicationId),
-            120_000,
-            "The forced warm-up task never reported offsets to the broker."
-        );
-
-        // Force a recompute (a new member) so the warm-up assignment and its reported offsets are fed back into the
-        // assignor's input GroupSpec together. (The forced warm-up lives in the assignor's *output*; it only appears
-        // in a captured *input* spec after a subsequent assignment round.)
-        final KafkaStreams instanceC = startStreams(builder);
-        waitForRunning(instanceC);
-
-        // Assert the assignor saw a member that is BOTH assigned the warm-up task AND reporting that task's offsets
-        // — i.e. the forced warm-up was created by the client, reported, and matched back to its task at the assignor.
-        TestUtils.waitForCondition(
-            () -> capturingAssignor.capturedSpecs().stream()
-                .anyMatch(StreamsGroupAssignorE2ETest::hasMemberWithReportedWarmup),
-            120_000,
+        // The forced warm-up lives in the assignor's *output*; it only appears in a captured *input* spec after a
+        // later assignment round (the client must first create the warm-up, restore it, and report its offsets). With
+        // no standby replicas, the only tasks that report offsets are warm-ups. Reported offsets don't bump the group
+        // epoch, so bounce an extra member until a recompute captures a spec where some member is BOTH assigned the
+        // warm-up and reporting that task's offsets. No broker-internal peeking.
+        churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
+            StreamsGroupAssignorE2ETest::hasMemberWithReportedWarmup,
             "Assignor never saw a member both assigned a warm-up task and reporting that task's offsets."
         );
     }
@@ -757,24 +746,55 @@ public class StreamsGroupAssignorE2ETest {
         );
     }
 
-    private GroupSpec waitForCapturedSpecWithTaskOffsets(final CapturingTaskAssignor assignor) throws Exception {
-        final List<GroupSpec> holder = new ArrayList<>();
-        TestUtils.waitForCondition(
-            () -> {
-                for (final GroupSpec spec : assignor.capturedSpecs()) {
-                    final boolean hasOffsets = spec.members().values().stream()
-                        .anyMatch(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty());
-                    if (hasOffsets) {
-                        holder.add(spec);
-                        return true;
-                    }
-                }
-                return false;
-            },
-            120_000,
-            "The assignor was never invoked with a GroupSpec carrying reported task offsets."
-        );
-        return holder.get(0);
+    /**
+     * Drives the capturing assignor to observe reported task offsets WITHOUT reading broker-internal state (so this
+     * survives the move to a pluggable assignor). Reported task offsets are transient and do not bump the group epoch,
+     * so the assignor is only re-invoked on membership changes. This repeatedly bounces one extra member — each join,
+     * and each subsequent leave, bumps the group epoch, triggering a recompute that captures a fresh {@link GroupSpec}
+     * reflecting whatever offsets have been reported so far — until a captured spec satisfies {@code condition}.
+     * In the common case the very first join already sees the offsets and no bouncing happens.
+     *
+     * @return the first captured spec that satisfies {@code condition}.
+     */
+    private GroupSpec churnUntilAssignorObserves(
+        final StreamsBuilder builder,
+        final CapturingTaskAssignor assignor,
+        final Predicate<GroupSpec> condition,
+        final String timeoutMessage
+    ) throws Exception {
+        final long deadlineMs = System.currentTimeMillis() + 120_000L;
+        while (System.currentTimeMillis() < deadlineMs) {
+            // Join an extra member -> group-epoch bump -> recompute -> the assignor is invoked and captures a spec.
+            // Reaching RUNNING means that rebalance (and therefore the capture) has completed.
+            final KafkaStreams churnMember = startStreams(builder);
+            waitForRunning(churnMember);
+
+            final GroupSpec match = firstCapturedSpecMatching(assignor, condition);
+            if (match != null) {
+                // Leave the extra member running; the surrounding test only needs the original members.
+                return match;
+            }
+
+            // Not observed yet: leave the group (another epoch bump) so the next iteration rejoins fresh and triggers
+            // a new recompute after more offsets have been reported.
+            stopChurnMember(churnMember);
+        }
+        throw new AssertionError(timeoutMessage);
+    }
+
+    private static GroupSpec firstCapturedSpecMatching(final CapturingTaskAssignor assignor,
+                                                       final Predicate<GroupSpec> condition) {
+        for (final GroupSpec spec : assignor.capturedSpecs()) {
+            if (condition.test(spec)) {
+                return spec;
+            }
+        }
+        return null;
+    }
+
+    private void stopChurnMember(final KafkaStreams churnMember) {
+        streamsInstances.remove(churnMember);
+        churnMember.close(Duration.ofSeconds(30L));
     }
 
     /**
@@ -861,32 +881,6 @@ public class StreamsGroupAssignorE2ETest {
             if (injected == 0) {
                 throw new IllegalStateException("Could not inject streams group assignors.");
             }
-        }
-
-        static boolean brokerHasReportedBothOffsets(final EmbeddedKafkaCluster cluster, final String groupId) {
-            try {
-                for (final Object gmm : groupMetadataManagers(cluster)) {
-                    final Object group;
-                    try {
-                        group = method(gmm, "streamsGroup", String.class).invoke(gmm, groupId);
-                    } catch (final Exception notFound) {
-                        continue;
-                    }
-                    final Object taskOffsets = method(group, "taskOffsets").invoke(group);
-                    if (taskOffsets instanceof Map<?, ?> map) {
-                        for (final Object value : map.values()) {
-                            if (value instanceof MemberTaskOffsets mto
-                                && !mto.taskOffsets().isEmpty()
-                                && !mto.taskEndOffsets().isEmpty()) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            } catch (final Exception ignored) {
-                // not ready yet
-            }
-            return false;
         }
 
         /** The broker's stored per-member reported offsets, keyed by member id (empty if the group/shard isn't ready). */
