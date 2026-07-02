@@ -183,68 +183,7 @@ public class StreamsGroupAssignorE2ETest {
     }
 
     @Test
-    public void shouldForwardReportedOffsetsAndConfigsToBrokerAssignorAndBackToClient() throws Exception {
-        startCluster(NUM_STANDBY_REPLICAS);
-        // A stateful topology so there is a changelog to restore, which means standby tasks report
-        // non-trivial task offsets/end-offsets (only restoring/standby/warm-up tasks contribute offsets).
-        final StreamsBuilder builder = new StreamsBuilder();
-        builder.stream(inputTopic, Consumed.with(Serdes.String(), Serdes.String()))
-            .groupByKey()
-            .count(Materialized.as(STORE_NAME))
-            .toStream()
-            .to(outputTopic, Produced.with(Serdes.String(), Serdes.Long()));
-
-        produceInput();
-
-        final KafkaStreams instanceA = startStreams(builder);
-        final KafkaStreams instanceB = startStreams(builder);
-        waitForRunning(instanceA);
-        waitForRunning(instanceB);
-
-        // Reported offsets do not bump the group epoch, so the assignor is only re-invoked on membership changes.
-        // Bounce an extra member until a recompute captures a GroupSpec in which some member reports BOTH task offsets
-        // and end-offsets (they are reported independently). Everything is observed through the assignor input — no
-        // broker-internal peeking, so this still works once the assignor becomes pluggable.
-        final GroupSpec specWithOffsets = churnUntilAssignorObserves(
-            builder,
-            capturingAssignor,
-            spec -> spec.members().values().stream()
-                .anyMatch(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty()),
-            "The assignor was never invoked with a GroupSpec carrying reported task offsets and end-offsets."
-        );
-
-        // Select the same member the wait gated on: one carrying BOTH offsets and end-offsets. taskOffsets and
-        // taskEndOffsets are reported independently, so with multiple members another member may have only offsets
-        // populated at capture time; picking by taskOffsets alone could select that member and spuriously fail the
-        // end-offsets assertion below.
-        final AssignmentMemberSpec memberWithOffsets = specWithOffsets.members().values().stream()
-            .filter(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty())
-            .findFirst()
-            .orElseThrow();
-        assertFalse(memberWithOffsets.taskOffsets().isEmpty(), "Expected reported task offsets to reach the assignor.");
-        assertFalse(memberWithOffsets.taskEndOffsets().isEmpty(), "Expected reported task end-offsets to reach the assignor.");
-        // Member metadata is forwarded too.
-        assertFalse(memberWithOffsets.processId().isEmpty(), "Expected a process id on the member spec.");
-
-        // Broker config reached the assignor via the assignment configs.
-        assertEquals(
-            Integer.toString(NUM_STANDBY_REPLICAS),
-            specWithOffsets.assignmentConfigs().get("num.standby.replicas"),
-            "Expected num.standby.replicas to reach the assignor via assignmentConfigs."
-        );
-
-        // Response leg: the client stored the configs the broker sent back.
-        final StreamsRebalanceData rebalanceData = Reflection.streamsRebalanceData(instanceA);
-        assertEquals(HEARTBEAT_INTERVAL_MS, rebalanceData.heartbeatIntervalMs(),
-            "Client did not store the broker's heartbeat interval.");
-        assertEquals(TASK_OFFSET_INTERVAL_MS, rebalanceData.taskOffsetIntervalMs(),
-            "Client did not store the broker's task-offset interval.");
-        assertEquals(ACCEPTABLE_RECOVERY_LAG, rebalanceData.acceptableRecoveryLag(),
-            "Client did not store the broker's acceptable recovery lag.");
-    }
-
-    @Test
-    public void shouldReportDeterministicOffsetsMatchedToTasks() throws Exception {
+    public void shouldForwardOffsetsMetadataAndConfigsToAssignorAndConfigsBackToClient() throws Exception {
         startCluster(NUM_STANDBY_REPLICAS);
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream(inputTopic, Consumed.with(Serdes.String(), Serdes.String()))
@@ -311,6 +250,30 @@ public class StreamsGroupAssignorE2ETest {
             assertEquals(expectedRecords - 1, offsetAndEnd[1],
                 "Reported taskEndOffsetSum for partition " + partition + " must equal the changelog last offset.");
         }
+
+        // Member metadata is forwarded to the assignor too. Pick a member reporting offsets (a real member, never the
+        // empty hidden churn member) and check its process id is present.
+        final AssignmentMemberSpec memberWithOffsets = spec.members().values().stream()
+            .filter(m -> !m.taskOffsets().isEmpty() && !m.taskEndOffsets().isEmpty())
+            .findFirst()
+            .orElseThrow();
+        assertFalse(memberWithOffsets.processId().isEmpty(), "Expected a process id on the member spec.");
+
+        // Broker config reached the assignor via the assignment configs.
+        assertEquals(
+            Integer.toString(NUM_STANDBY_REPLICAS),
+            spec.assignmentConfigs().get("num.standby.replicas"),
+            "Expected num.standby.replicas to reach the assignor via assignmentConfigs."
+        );
+
+        // Response leg: the client stored the configs the broker sent back.
+        final StreamsRebalanceData rebalanceData = Reflection.streamsRebalanceData(instanceA);
+        assertEquals(HEARTBEAT_INTERVAL_MS, rebalanceData.heartbeatIntervalMs(),
+            "Client did not store the broker's heartbeat interval.");
+        assertEquals(TASK_OFFSET_INTERVAL_MS, rebalanceData.taskOffsetIntervalMs(),
+            "Client did not store the broker's task-offset interval.");
+        assertEquals(ACCEPTABLE_RECOVERY_LAG, rebalanceData.acceptableRecoveryLag(),
+            "Client did not store the broker's acceptable recovery lag.");
     }
 
     /** Collapses a captured spec's per-member reported offsets to partition -> [taskOffsetSum, taskEndOffsetSum]. */
@@ -359,7 +322,7 @@ public class StreamsGroupAssignorE2ETest {
         // later assignment round (the client must first create the warm-up, restore it, and report its offsets). With
         // no standby replicas, the only tasks that report offsets are warm-ups. Reported offsets don't bump the group
         // epoch, so bounce an extra member until a recompute captures a spec where some member is BOTH assigned the
-        // warm-up and reporting that task's offsets. No broker-internal peeking.
+        // warm-up and reporting that task's offsets.
         churnUntilAssignorObserves(
             builder,
             capturingAssignor,
@@ -500,7 +463,7 @@ public class StreamsGroupAssignorE2ETest {
     public void shouldReportCommittedEndOffsetForSourceTopicOptimizedStore() throws Exception {
         // A store materialized directly from a source topic with REUSE_KTABLE_SOURCE_TOPICS reuses the source topic
         // AS the changelog (no separate changelog topic). For such stores the reported task END offset is the
-        // *committed* (logical) offset on the source topic -- min(physicalEnd, committed) -- not the physical
+        // *committed* (logical log-end-)offset on the source topic -- min(physicalEnd, committed) -- not the physical
         // log-end-offset. We make committed < physical by letting the active commit M records, then pausing
         // processing (KafkaStreams#pause keeps the member heartbeating but stops consumption, so the committed
         // offset freezes) while we append more records to the source topic; the standby then reports end == committed.
@@ -779,11 +742,11 @@ public class StreamsGroupAssignorE2ETest {
     }
 
     /**
-     * Drives the capturing assignor to observe reported task offsets WITHOUT reading broker-internal state (so this
-     * survives the move to a pluggable assignor). Reported task offsets are transient and do not bump the group epoch,
-     * so the assignor is only re-invoked on membership changes. This repeatedly bounces one extra member — each join,
-     * and each subsequent leave, bumps the group epoch, triggering a recompute that captures a fresh {@link GroupSpec}
-     * reflecting whatever offsets have been reported so far — until a captured spec satisfies {@code condition}.
+     * Drives the capturing assignor to observe reported task offsets. Reported task offsets are transient and do not
+     * bump the group epoch, so the assignor is only re-invoked on membership changes.
+     * This repeatedly bounces one extra member — each join, and each subsequent leave, bumps the group epoch,
+     * triggering a recompute that captures a fresh {@link GroupSpec} reflecting whatever offsets have been
+     * reported so far — until a captured spec satisfies {@code condition}.
      * In the common case the very first join already sees the offsets and no bouncing happens.
      *
      * @return the first captured spec that satisfies {@code condition}.
