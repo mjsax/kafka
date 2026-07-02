@@ -37,6 +37,7 @@ import org.apache.kafka.coordinator.group.streams.MemberTaskOffsets;
 import org.apache.kafka.coordinator.group.streams.assignor.AssignmentMemberSpec;
 import org.apache.kafka.coordinator.group.streams.assignor.GroupAssignment;
 import org.apache.kafka.coordinator.group.streams.assignor.GroupSpec;
+import org.apache.kafka.coordinator.group.streams.assignor.GroupSpecImpl;
 import org.apache.kafka.coordinator.group.streams.assignor.MemberAssignment;
 import org.apache.kafka.coordinator.group.streams.assignor.StickyTaskAssignor;
 import org.apache.kafka.coordinator.group.streams.assignor.TaskAssignor;
@@ -113,6 +114,11 @@ public class StreamsGroupAssignorE2ETest {
     private static final long ACCEPTABLE_RECOVERY_LAG = 4242L;
     private static final int TASK_OFFSET_INTERVAL_MS = 1_000;
     private static final int HEARTBEAT_INTERVAL_MS = 500;
+    // Client-tag key marking a throwaway "churn" member: the injected assignor recognizes it, hides it from the
+    // delegate sticky assignor (so the real members' tasks don't move), and gives it an empty assignment. This lets a
+    // test bump the group epoch — forcing a fresh assignor invocation that captures current offsets — without a
+    // rebalance that would disturb the placement under test.
+    private static final String CHURN_TAG = "assignor-e2e-churn";
 
     private EmbeddedKafkaCluster cluster;
     private String inputTopic;
@@ -278,16 +284,22 @@ public class StreamsGroupAssignorE2ETest {
         // caught-up task reports offset == N and endOffset == N-1 (assignor lag endOffset-offset = -1). The two
         // values come from different code paths (StateDirectory.taskOffsetSums vs logicalChangelogEndOffsets) with
         // different offset conventions; harmless against acceptable.recovery.lag but worth revisiting.
-        TestUtils.waitForCondition(
-            () -> {
-                final Map<Integer, long[]> reported = reportedOffsetsByPartition();
+        // Reported offsets don't bump the group epoch, so the assignor is only re-invoked on membership changes.
+        // Bounce a HIDDEN churn member (see CHURN_TAG) until a recompute captures a GroupSpec whose reported offsets
+        // show BOTH standby partitions caught up, then assert the exact values from that captured spec. Hiding the
+        // churn member keeps the two real members' standbys in place so they stay caught up — no broker-internal peeking.
+        final GroupSpec spec = churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
+            captured -> {
+                final Map<Integer, long[]> reported = reportedOffsetsByPartition(captured);
                 return matchesCaughtUp(reported.get(0), recordsP0) && matchesCaughtUp(reported.get(1), recordsP1);
             },
-            120_000,
-            "Both standby tasks did not report deterministic caught-up offsets matched to their changelog partitions."
+            "Both standby tasks did not report deterministic caught-up offsets matched to their changelog partitions.",
+            Map.of(StreamsConfig.CLIENT_TAG_PREFIX + CHURN_TAG, "true")
         );
 
-        final Map<Integer, long[]> reported = reportedOffsetsByPartition();
+        final Map<Integer, long[]> reported = reportedOffsetsByPartition(spec);
         for (final int partition : new int[] {0, 1}) {
             final long expectedRecords = partition == 0 ? recordsP0 : recordsP1;
             final long[] offsetAndEnd = reported.get(partition);
@@ -299,10 +311,10 @@ public class StreamsGroupAssignorE2ETest {
         }
     }
 
-    /** Collapses the broker's per-member reported offsets to partition -> [taskOffsetSum, taskEndOffsetSum]. */
-    private Map<Integer, long[]> reportedOffsetsByPartition() {
+    /** Collapses a captured spec's per-member reported offsets to partition -> [taskOffsetSum, taskEndOffsetSum]. */
+    private static Map<Integer, long[]> reportedOffsetsByPartition(final GroupSpec spec) {
         final Map<Integer, long[]> byPartition = new HashMap<>();
-        for (final MemberTaskOffsets member : Reflection.brokerTaskOffsets(cluster, applicationId).values()) {
+        for (final AssignmentMemberSpec member : spec.members().values()) {
             member.taskOffsets().forEach((task, offset) -> {
                 final Long endOffset = member.taskEndOffsets().get(task);
                 if (endOffset != null) {
@@ -762,11 +774,28 @@ public class StreamsGroupAssignorE2ETest {
         final Predicate<GroupSpec> condition,
         final String timeoutMessage
     ) throws Exception {
+        return churnUntilAssignorObserves(builder, assignor, condition, timeoutMessage, Map.of());
+    }
+
+    /**
+     * As above, but the churn member is started with {@code churnMemberProps}. Passing the {@link #CHURN_TAG} client
+     * tag makes the injected assignor hide the churn member and give it an empty assignment, so the real members' task
+     * placement stays fixed across the bumps — required by tests that assert a specific stable state (e.g. both
+     * standbys caught up), which a normal rebalance would disturb.
+     */
+    private GroupSpec churnUntilAssignorObserves(
+        final StreamsBuilder builder,
+        final CapturingTaskAssignor assignor,
+        final Predicate<GroupSpec> condition,
+        final String timeoutMessage,
+        final Map<String, Object> churnMemberProps
+    ) throws Exception {
         final long deadlineMs = System.currentTimeMillis() + 120_000L;
         while (System.currentTimeMillis() < deadlineMs) {
             // Join an extra member -> group-epoch bump -> recompute -> the assignor is invoked and captures a spec.
             // Reaching RUNNING means that rebalance (and therefore the capture) has completed.
-            final KafkaStreams churnMember = startStreams(builder);
+            final KafkaStreams churnMember =
+                startStreams(builder, TestUtils.tempDirectory().getAbsolutePath(), null, churnMemberProps);
             waitForRunning(churnMember);
 
             final GroupSpec match = firstCapturedSpecMatching(assignor, condition);
@@ -823,7 +852,31 @@ public class StreamsGroupAssignorE2ETest {
             final TopologyDescriber topologyDescriber
         ) throws TaskAssignorException {
             capturedSpecs.add(groupSpec);
-            return transform.apply(delegate.assign(groupSpec, topologyDescriber));
+
+            // A "churn" member (marked with the CHURN_TAG client tag) exists only to bump the group epoch so we can
+            // observe reported offsets in a fresh capture. Hide it from the delegate so its presence does not move the
+            // real members' tasks (sticky sees the same input and returns the same assignment), and hand it an empty
+            // assignment. When no churn member is present (all other tests) this is a plain sticky assignment.
+            final Map<String, AssignmentMemberSpec> realMembers = new HashMap<>();
+            final Set<String> churnMembers = new HashSet<>();
+            groupSpec.members().forEach((memberId, member) -> {
+                if ("true".equals(member.clientTags().get(CHURN_TAG))) {
+                    churnMembers.add(memberId);
+                } else {
+                    realMembers.put(memberId, member);
+                }
+            });
+
+            final GroupAssignment base = delegate.assign(
+                new GroupSpecImpl(realMembers, groupSpec.assignmentConfigs()),
+                topologyDescriber
+            );
+            if (churnMembers.isEmpty()) {
+                return transform.apply(base);
+            }
+            final Map<String, MemberAssignment> merged = new HashMap<>(base.members());
+            churnMembers.forEach(memberId -> merged.put(memberId, MemberAssignment.empty()));
+            return transform.apply(new GroupAssignment(merged));
         }
 
         List<GroupSpec> capturedSpecs() {
@@ -883,7 +936,17 @@ public class StreamsGroupAssignorE2ETest {
             }
         }
 
-        /** The broker's stored per-member reported offsets, keyed by member id (empty if the group/shard isn't ready). */
+        /**
+         * The broker's stored per-member reported offsets, keyed by member id (empty if the group/shard isn't ready).
+         * <p>
+         * These tests observe offsets while the group is held in a controlled placement (a paused instance, a warm-up
+         * held behind a paused restore consumer, or a restart). The assignor is only invoked on a group-epoch bump
+         * (a rebalance), which normally moves tasks, so observing through the assignor would perturb the very state
+         * under test. Test A avoids this with a hidden "churn" member (see {@link StreamsGroupAssignorE2ETest#CHURN_TAG})
+         * that bumps the epoch
+         * without moving the real members' tasks; applying the same trick to these tests is possible but not yet done,
+         * so for now they read live coordinator state directly here.
+         */
         @SuppressWarnings("unchecked")
         static Map<String, MemberTaskOffsets> brokerTaskOffsets(final EmbeddedKafkaCluster cluster, final String groupId) {
             try {
