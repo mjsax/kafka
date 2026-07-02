@@ -33,7 +33,6 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.coordinator.group.GroupCoordinatorConfig;
-import org.apache.kafka.coordinator.group.streams.MemberTaskOffsets;
 import org.apache.kafka.coordinator.group.streams.assignor.AssignmentMemberSpec;
 import org.apache.kafka.coordinator.group.streams.assignor.GroupAssignment;
 import org.apache.kafka.coordinator.group.streams.assignor.GroupSpec;
@@ -119,6 +118,9 @@ public class StreamsGroupAssignorE2ETest {
     // test bump the group epoch — forcing a fresh assignor invocation that captures current offsets — without a
     // rebalance that would disturb the placement under test.
     private static final String CHURN_TAG = "assignor-e2e-churn";
+    // Streams config for a churn member: sets the CHURN_TAG client tag so the injected assignor hides it.
+    private static final Map<String, Object> CHURN_MEMBER_PROPS =
+        Map.of(StreamsConfig.CLIENT_TAG_PREFIX + CHURN_TAG, "true");
 
     private EmbeddedKafkaCluster cluster;
     private String inputTopic;
@@ -296,7 +298,7 @@ public class StreamsGroupAssignorE2ETest {
                 return matchesCaughtUp(reported.get(0), recordsP0) && matchesCaughtUp(reported.get(1), recordsP1);
             },
             "Both standby tasks did not report deterministic caught-up offsets matched to their changelog partitions.",
-            Map.of(StreamsConfig.CLIENT_TAG_PREFIX + CHURN_TAG, "true")
+            CHURN_MEMBER_PROPS
         );
 
         final Map<Integer, long[]> reported = reportedOffsetsByPartition(spec);
@@ -404,21 +406,26 @@ public class StreamsGroupAssignorE2ETest {
         waitForRunning(instanceA);
         waitForRunning(instanceB);
 
-        // While restore is paused, the warm-up cannot make progress: the broker observes it not caught up (it has
-        // restored nothing, so its reported offset is 0).
-        TestUtils.waitForCondition(
-            () -> reportsTaskWithOffset(0L),
-            120_000,
-            "Paused warm-up never reported a not-caught-up offset (0) to the broker."
+        // While restore is paused, the warm-up cannot make progress: the assignor observes it not caught up (it has
+        // restored nothing, so its reported offset is 0). A hidden churn member bumps the epoch to force fresh
+        // captures without moving the warm-up off its (paused-restore) instance.
+        churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
+            spec -> reportsTaskWithOffset(spec, 0L),
+            "Paused warm-up never reported a not-caught-up offset (0) to the assignor.",
+            CHURN_MEMBER_PROPS
         );
 
-        // Releasing restore lets the warm-up catch up: the broker now observes it caught up (its reported offset
+        // Releasing restore lets the warm-up catch up: the assignor now observes it caught up (its reported offset
         // reaches the changelog end; the off-by-one means offset == end + 1, i.e. lag <= 0).
         supplier.pauseRestore(false);
-        TestUtils.waitForCondition(
+        churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
             this::reportsCaughtUpTask,
-            120_000,
-            "Warm-up never reported as caught up after restore was released."
+            "Warm-up never reported as caught up after restore was released.",
+            CHURN_MEMBER_PROPS
         );
     }
 
@@ -478,10 +485,14 @@ public class StreamsGroupAssignorE2ETest {
         // and reported on startup while still behind.
         // The restarted instance found its local state and reported its on-disk (checkpoint) offset sums on startup
         // — the pre-delta values (recordsP0, recordsP1) — even though the changelog has since advanced beyond them.
-        TestUtils.waitForCondition(
-            () -> reportsStaleOnDiskState(recordsP0, recordsP1),
-            120_000,
-            "Restarted instance never reported its on-disk (checkpoint) offsets on startup."
+        // A hidden churn member bumps the epoch to force fresh captures without moving B's tasks (which would let it
+        // resume restoring off its paused consumer or drop the local state we want reported).
+        churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
+            spec -> reportsStaleOnDiskState(spec, recordsP0, recordsP1),
+            "Restarted instance never reported its on-disk (checkpoint) offsets on startup.",
+            CHURN_MEMBER_PROPS
         );
     }
 
@@ -540,25 +551,34 @@ public class StreamsGroupAssignorE2ETest {
         // For the partition instanceA is active for, the committed offset stays frozen below the physical end, and
         // instanceB's standby reports the COMMITTED (logical) end-offset for it — min(physical, committed) — i.e. the
         // reported end tracks committed (== committed or committed-1 off-by-one) and is strictly below the physical end.
-        TestUtils.waitForCondition(
-            () -> {
+        // A hidden churn member bumps the epoch to force fresh captures without moving instanceA's (paused) active task
+        // — which would unfreeze the committed offset. The committed offset is still read live (Admin, not reflection).
+        churnUntilAssignorObserves(
+            builder,
+            capturingAssignor,
+            spec -> {
                 for (final int partition : new int[] {0, 1}) {
-                    final long committed = committedOffset(inputTopic, partition);
-                    if (committed < physicalEnd && reportsLogicalEndOffset(partition, committed, physicalEnd)) {
+                    final long committed;
+                    try {
+                        committed = committedOffset(inputTopic, partition);
+                    } catch (final Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                    if (committed < physicalEnd && reportsLogicalEndOffset(spec, partition, committed, physicalEnd)) {
                         return true;
                     }
                 }
                 return false;
             },
-            120_000,
-            "Standby never reported the committed (logical) end offset for the source-topic-optimized store."
+            "Standby never reported the committed (logical) end offset for the source-topic-optimized store.",
+            CHURN_MEMBER_PROPS
         );
     }
 
-    /** True if some member reports partition {@code p} with an end-offset that tracks committed (committed or
-     *  committed-1) and is strictly below the physical end — i.e. the logical (committed) end, not the physical end. */
-    private boolean reportsLogicalEndOffset(final int partition, final long committed, final long physicalEnd) {
-        for (final MemberTaskOffsets member : Reflection.brokerTaskOffsets(cluster, applicationId).values()) {
+    /** True if some member in the captured spec reports partition {@code p} with an end-offset that tracks committed
+     *  (committed or committed-1) and is strictly below the physical end — i.e. the logical (committed) end, not the physical end. */
+    private static boolean reportsLogicalEndOffset(final GroupSpec spec, final int partition, final long committed, final long physicalEnd) {
+        for (final AssignmentMemberSpec member : spec.members().values()) {
             for (final Map.Entry<TaskId, Long> entry : member.taskEndOffsets().entrySet()) {
                 final long end = entry.getValue();
                 if (entry.getKey().partition() == partition
@@ -587,16 +607,16 @@ public class StreamsGroupAssignorE2ETest {
         }
     }
 
-    /** True if some broker-stored member reports a task whose offset equals {@code offset}. */
-    private boolean reportsTaskWithOffset(final long offset) {
-        return Reflection.brokerTaskOffsets(cluster, applicationId).values().stream()
+    /** True if some member in the captured spec reports a task whose offset equals {@code offset}. */
+    private static boolean reportsTaskWithOffset(final GroupSpec spec, final long offset) {
+        return spec.members().values().stream()
             .flatMap(member -> member.taskOffsets().values().stream())
             .anyMatch(reported -> reported == offset);
     }
 
-    /** True if some broker-stored member reports a task that is caught up: finite end-offset and offset >= end. */
-    private boolean reportsCaughtUpTask() {
-        for (final MemberTaskOffsets member : Reflection.brokerTaskOffsets(cluster, applicationId).values()) {
+    /** True if some member in the captured spec reports a task that is caught up: finite end-offset and offset >= end. */
+    private boolean reportsCaughtUpTask(final GroupSpec spec) {
+        for (final AssignmentMemberSpec member : spec.members().values()) {
             for (final Map.Entry<TaskId, Long> entry : member.taskOffsets().entrySet()) {
                 final Long end = member.taskEndOffsets().get(entry.getKey());
                 if (end != null && end != Long.MAX_VALUE && entry.getValue() >= end) {
@@ -607,9 +627,9 @@ public class StreamsGroupAssignorE2ETest {
         return false;
     }
 
-    /** True if some member reports BOTH partitions' on-disk (checkpoint) offsets: partition 0 == p0, partition 1 == p1. */
-    private boolean reportsStaleOnDiskState(final long p0, final long p1) {
-        for (final MemberTaskOffsets member : Reflection.brokerTaskOffsets(cluster, applicationId).values()) {
+    /** True if some member in the captured spec reports BOTH partitions' on-disk (checkpoint) offsets: partition 0 == p0, partition 1 == p1. */
+    private static boolean reportsStaleOnDiskState(final GroupSpec spec, final long p0, final long p1) {
+        for (final AssignmentMemberSpec member : spec.members().values()) {
             Long offset0 = null;
             Long offset1 = null;
             for (final Map.Entry<TaskId, Long> entry : member.taskOffsets().entrySet()) {
@@ -867,16 +887,18 @@ public class StreamsGroupAssignorE2ETest {
                 }
             });
 
-            final GroupAssignment base = delegate.assign(
+            // Apply the test transform (e.g. forcing a warm-up) to the REAL members' assignment only, so it never
+            // targets a churn member. Churn members are always assigned empty.
+            final GroupAssignment realAssignment = transform.apply(delegate.assign(
                 new GroupSpecImpl(realMembers, groupSpec.assignmentConfigs()),
                 topologyDescriber
-            );
+            ));
             if (churnMembers.isEmpty()) {
-                return transform.apply(base);
+                return realAssignment;
             }
-            final Map<String, MemberAssignment> merged = new HashMap<>(base.members());
+            final Map<String, MemberAssignment> merged = new HashMap<>(realAssignment.members());
             churnMembers.forEach(memberId -> merged.put(memberId, MemberAssignment.empty()));
-            return transform.apply(new GroupAssignment(merged));
+            return new GroupAssignment(merged);
         }
 
         List<GroupSpec> capturedSpecs() {
@@ -934,38 +956,6 @@ public class StreamsGroupAssignorE2ETest {
             if (injected == 0) {
                 throw new IllegalStateException("Could not inject streams group assignors.");
             }
-        }
-
-        /**
-         * The broker's stored per-member reported offsets, keyed by member id (empty if the group/shard isn't ready).
-         * <p>
-         * These tests observe offsets while the group is held in a controlled placement (a paused instance, a warm-up
-         * held behind a paused restore consumer, or a restart). The assignor is only invoked on a group-epoch bump
-         * (a rebalance), which normally moves tasks, so observing through the assignor would perturb the very state
-         * under test. Test A avoids this with a hidden "churn" member (see {@link StreamsGroupAssignorE2ETest#CHURN_TAG})
-         * that bumps the epoch
-         * without moving the real members' tasks; applying the same trick to these tests is possible but not yet done,
-         * so for now they read live coordinator state directly here.
-         */
-        @SuppressWarnings("unchecked")
-        static Map<String, MemberTaskOffsets> brokerTaskOffsets(final EmbeddedKafkaCluster cluster, final String groupId) {
-            try {
-                for (final Object gmm : groupMetadataManagers(cluster)) {
-                    final Object group;
-                    try {
-                        group = method(gmm, "streamsGroup", String.class).invoke(gmm, groupId);
-                    } catch (final Exception notFound) {
-                        continue;
-                    }
-                    final Object taskOffsets = method(group, "taskOffsets").invoke(group);
-                    if (taskOffsets instanceof Map<?, ?> map && !map.isEmpty()) {
-                        return (Map<String, MemberTaskOffsets>) map;
-                    }
-                }
-            } catch (final Exception ignored) {
-                // not ready yet
-            }
-            return Map.of();
         }
 
         private static List<Object> groupMetadataManagers(final EmbeddedKafkaCluster cluster) throws Exception {
