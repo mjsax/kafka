@@ -428,10 +428,7 @@ public class CurrentAssignmentBuilder {
             newActiveTasksPendingAssignment,
             (subtopologyId, partitionId) ->
                 currentActiveTaskProcessId.apply(subtopologyId, partitionId) != null ||
-                    currentStandbyTaskProcessIds.apply(subtopologyId, partitionId)
-                        .contains(member.processId()) ||
-                    currentWarmupTaskProcessIds.apply(subtopologyId, partitionId)
-                        .contains(member.processId())
+                    isStandbyOrWarmupOnProcessOwnedByAnotherMember(subtopologyId, partitionId, memberAssignedTasks)
         );
 
         boolean hasUnreleasedStandbyTasks = computeAssignmentDifference(
@@ -464,6 +461,13 @@ public class CurrentAssignmentBuilder {
                         .contains(member.processId())
         );
 
+        removeSingleStepPromotions(
+            newActiveTasksPendingAssignment,
+            newActiveTasksPendingRevocation,
+            newStandbyTasksPendingRevocation,
+            newWarmupTasksPendingRevocation
+        );
+
         return buildNewMember(
             memberEpoch,
             new TasksTupleWithEpochs(
@@ -483,6 +487,61 @@ public class CurrentAssignmentBuilder {
             ),
             hasUnreleasedActiveTasks || hasUnreleasedStandbyTasks || hasUnreleasedWarmupTasks
         );
+    }
+
+    /**
+     * Checks whether the given task is owned as a standby or warmup task on the process of this
+     * member, by another member than this member. A standby or warmup task owned by the member
+     * itself does not make the corresponding active task unreleased, since the member can revoke
+     * the standby or warmup task and take on the active task in a single step. Note that the
+     * assignor never places a standby or warmup task of the same task more than once on a process,
+     * so if the member owns the task as standby or warmup, it is the only owner on its process.
+     */
+    private boolean isStandbyOrWarmupOnProcessOwnedByAnotherMember(String subtopologyId,
+                                                                   int partitionId,
+                                                                   TasksTupleWithEpochs memberAssignedTasks) {
+        return currentStandbyTaskProcessIds.apply(subtopologyId, partitionId).contains(member.processId())
+                && !containsTask(memberAssignedTasks.standbyTasks(), subtopologyId, partitionId) ||
+            currentWarmupTaskProcessIds.apply(subtopologyId, partitionId).contains(member.processId())
+                && !containsTask(memberAssignedTasks.warmupTasks(), subtopologyId, partitionId);
+    }
+
+    private static boolean containsTask(Map<String, Set<Integer>> tasks, String subtopologyId, int partitionId) {
+        return tasks.getOrDefault(subtopologyId, Set.of()).contains(partitionId);
+    }
+
+    /**
+     * Standby and warmup tasks that the member must revoke while the corresponding active task is
+     * pending assignment to the same member are promotions of the task on its own process. They are
+     * performed in a single step - the standby or warmup task is revoked and the active task is
+     * assigned in the same heartbeat - so that the member can recycle the task's state store
+     * instead of closing it and restoring the state from the changelog (cf. KAFKA-9501). This is
+     * safe, because the task does not leave the process, and the active task is only pending
+     * assignment if no other member owns it in an active role. The single-step promotion is only
+     * performed if the member has no other tasks to revoke, since any pending revocation prevents
+     * the assignment of the pending tasks.
+     */
+    private static void removeSingleStepPromotions(Map<String, Map<Integer, Integer>> activeTasksPendingAssignment,
+                                                   Map<String, Map<Integer, Integer>> activeTasksPendingRevocation,
+                                                   Map<String, Set<Integer>> standbyTasksPendingRevocation,
+                                                   Map<String, Set<Integer>> warmupTasksPendingRevocation) {
+        if (activeTasksPendingRevocation.isEmpty()
+                && isPendingAssignment(standbyTasksPendingRevocation, activeTasksPendingAssignment)
+                && isPendingAssignment(warmupTasksPendingRevocation, activeTasksPendingAssignment)) {
+            standbyTasksPendingRevocation.clear();
+            warmupTasksPendingRevocation.clear();
+        }
+    }
+
+    private static boolean isPendingAssignment(Map<String, Set<Integer>> tasks,
+                                               Map<String, Map<Integer, Integer>> activeTasksPendingAssignment) {
+        for (Map.Entry<String, Set<Integer>> entry : tasks.entrySet()) {
+            Map<Integer, Integer> pendingTasks = activeTasksPendingAssignment.get(entry.getKey());
+            if (pendingTasks == null || !pendingTasks.keySet().containsAll(entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private StreamsGroupMember buildNewMember(final int memberEpoch,

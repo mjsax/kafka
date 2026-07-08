@@ -974,4 +974,175 @@ public class CurrentAssignmentBuilderTest {
             updatedMember
         );
     }
+
+    @ParameterizedTest
+    @EnumSource(value = TaskRole.class, names = {"STANDBY", "WARMUP"})
+    public void testStandbyToActivePromotionInSingleStep(TaskRole taskRole) {
+        final int memberEpoch = 10;
+
+        // The member owns the task in a standby or warmup role, and the task is an active task
+        // in the target assignment. The previous owner of the active task has left the group.
+        StreamsGroupMember member = new StreamsGroupMember.Builder(MEMBER_NAME)
+            .setState(MemberState.STABLE)
+            .setProcessId(PROCESS_ID)
+            .setMemberEpoch(memberEpoch)
+            .setPreviousMemberEpoch(memberEpoch)
+            .setAssignedTasks(mkTasksTupleWithCommonEpoch(taskRole, memberEpoch,
+                mkTasks(SUBTOPOLOGY_ID1, 0)))
+            .setTasksPendingRevocation(TasksTupleWithEpochs.EMPTY)
+            .build();
+
+        StreamsGroupMember updatedMember = new CurrentAssignmentBuilder(member)
+            .withTargetAssignment(memberEpoch + 1, mkTasksTuple(TaskRole.ACTIVE,
+                mkTasks(SUBTOPOLOGY_ID1, 0)))
+            .withCurrentActiveTaskProcessId((subtopologyId, partitionId) -> null)
+            .withCurrentStandbyTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.STANDBY ? Set.of(PROCESS_ID) : Set.of())
+            .withCurrentWarmupTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.WARMUP ? Set.of(PROCESS_ID) : Set.of())
+            .build();
+
+        // The standby or warmup task is revoked and the active task is assigned in the same
+        // step, so that the member can recycle the task's state store instead of closing it
+        // and restoring the state from the changelog.
+        assertEquals(
+            new StreamsGroupMember.Builder(MEMBER_NAME)
+                .setState(MemberState.STABLE)
+                .setProcessId(PROCESS_ID)
+                .setMemberEpoch(memberEpoch + 1)
+                .setPreviousMemberEpoch(memberEpoch)
+                .setAssignedTasks(mkTasksTupleWithCommonEpoch(TaskRole.ACTIVE, memberEpoch + 1,
+                    mkTasks(SUBTOPOLOGY_ID1, 0)))
+                .setTasksPendingRevocation(TasksTupleWithEpochs.EMPTY)
+                .build(),
+            updatedMember
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TaskRole.class, names = {"STANDBY", "WARMUP"})
+    public void testStandbyToActivePromotionWithOtherTasksToRevoke(TaskRole taskRole) {
+        final int memberEpoch = 10;
+
+        // Task 0 is promoted to an active task, but task 1 must be revoked without a
+        // corresponding active task being assigned.
+        StreamsGroupMember member = new StreamsGroupMember.Builder(MEMBER_NAME)
+            .setState(MemberState.STABLE)
+            .setProcessId(PROCESS_ID)
+            .setMemberEpoch(memberEpoch)
+            .setPreviousMemberEpoch(memberEpoch)
+            .setAssignedTasks(mkTasksTupleWithCommonEpoch(taskRole, memberEpoch,
+                mkTasks(SUBTOPOLOGY_ID1, 0, 1)))
+            .setTasksPendingRevocation(TasksTupleWithEpochs.EMPTY)
+            .build();
+
+        StreamsGroupMember updatedMember = new CurrentAssignmentBuilder(member)
+            .withTargetAssignment(memberEpoch + 1, mkTasksTuple(TaskRole.ACTIVE,
+                mkTasks(SUBTOPOLOGY_ID1, 0)))
+            .withCurrentActiveTaskProcessId((subtopologyId, partitionId) -> null)
+            .withCurrentStandbyTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.STANDBY ? Set.of(PROCESS_ID) : Set.of())
+            .withCurrentWarmupTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.WARMUP ? Set.of(PROCESS_ID) : Set.of())
+            .build();
+
+        // Since the member has other tasks to revoke, the single-step promotion is not
+        // performed, and the member must first revoke both tasks.
+        assertEquals(
+            new StreamsGroupMember.Builder(MEMBER_NAME)
+                .setState(MemberState.UNREVOKED_TASKS)
+                .setProcessId(PROCESS_ID)
+                .setMemberEpoch(memberEpoch)
+                .setPreviousMemberEpoch(memberEpoch)
+                .setAssignedTasks(TasksTupleWithEpochs.EMPTY)
+                .setTasksPendingRevocation(mkTasksTupleWithCommonEpoch(taskRole, memberEpoch,
+                    mkTasks(SUBTOPOLOGY_ID1, 0, 1)))
+                .build(),
+            updatedMember
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TaskRole.class, names = {"STANDBY", "WARMUP"})
+    public void testStandbyToActivePromotionWithUnreleasedActiveTask(TaskRole taskRole) {
+        final int memberEpoch = 10;
+
+        // Task 0 is promoted to an active task, but the previous owner of the active task has
+        // not yet revoked it.
+        StreamsGroupMember member = new StreamsGroupMember.Builder(MEMBER_NAME)
+            .setState(MemberState.STABLE)
+            .setProcessId(PROCESS_ID)
+            .setMemberEpoch(memberEpoch)
+            .setPreviousMemberEpoch(memberEpoch)
+            .setAssignedTasks(mkTasksTupleWithCommonEpoch(taskRole, memberEpoch,
+                mkTasks(SUBTOPOLOGY_ID1, 0)))
+            .setTasksPendingRevocation(TasksTupleWithEpochs.EMPTY)
+            .build();
+
+        StreamsGroupMember updatedMember = new CurrentAssignmentBuilder(member)
+            .withTargetAssignment(memberEpoch + 1, mkTasksTuple(TaskRole.ACTIVE,
+                mkTasks(SUBTOPOLOGY_ID1, 0)))
+            .withCurrentActiveTaskProcessId((subtopologyId, partitionId) -> "otherProcess")
+            .withCurrentStandbyTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.STANDBY ? Set.of(PROCESS_ID) : Set.of())
+            .withCurrentWarmupTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.WARMUP ? Set.of(PROCESS_ID) : Set.of())
+            .build();
+
+        // Since the active task cannot be assigned yet, the single-step promotion is not
+        // performed, and the member must first revoke the standby or warmup task.
+        assertEquals(
+            new StreamsGroupMember.Builder(MEMBER_NAME)
+                .setState(MemberState.UNREVOKED_TASKS)
+                .setProcessId(PROCESS_ID)
+                .setMemberEpoch(memberEpoch)
+                .setPreviousMemberEpoch(memberEpoch)
+                .setAssignedTasks(TasksTupleWithEpochs.EMPTY)
+                .setTasksPendingRevocation(mkTasksTupleWithCommonEpoch(taskRole, memberEpoch,
+                    mkTasks(SUBTOPOLOGY_ID1, 0)))
+                .build(),
+            updatedMember
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TaskRole.class, names = {"STANDBY", "WARMUP"})
+    public void testNoPromotionWhenStandbyOwnedByAnotherMemberOnSameProcess(TaskRole taskRole) {
+        final int memberEpoch = 10;
+
+        // The task is an active task in the target assignment of the member, but another member
+        // on the same process owns the task in a standby or warmup role.
+        StreamsGroupMember member = new StreamsGroupMember.Builder(MEMBER_NAME)
+            .setState(MemberState.STABLE)
+            .setProcessId(PROCESS_ID)
+            .setMemberEpoch(memberEpoch)
+            .setPreviousMemberEpoch(memberEpoch)
+            .setAssignedTasks(TasksTupleWithEpochs.EMPTY)
+            .setTasksPendingRevocation(TasksTupleWithEpochs.EMPTY)
+            .build();
+
+        StreamsGroupMember updatedMember = new CurrentAssignmentBuilder(member)
+            .withTargetAssignment(memberEpoch + 1, mkTasksTuple(TaskRole.ACTIVE,
+                mkTasks(SUBTOPOLOGY_ID1, 0)))
+            .withCurrentActiveTaskProcessId((subtopologyId, partitionId) -> null)
+            .withCurrentStandbyTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.STANDBY ? Set.of(PROCESS_ID) : Set.of())
+            .withCurrentWarmupTaskProcessIds((subtopologyId, partitionId) ->
+                taskRole == TaskRole.WARMUP ? Set.of(PROCESS_ID) : Set.of())
+            .build();
+
+        // The active task remains unreleased until the other member has revoked its standby or
+        // warmup task.
+        assertEquals(
+            new StreamsGroupMember.Builder(MEMBER_NAME)
+                .setState(MemberState.UNRELEASED_TASKS)
+                .setProcessId(PROCESS_ID)
+                .setMemberEpoch(memberEpoch + 1)
+                .setPreviousMemberEpoch(memberEpoch)
+                .setAssignedTasks(TasksTupleWithEpochs.EMPTY)
+                .setTasksPendingRevocation(TasksTupleWithEpochs.EMPTY)
+                .build(),
+            updatedMember
+        );
+    }
 }
