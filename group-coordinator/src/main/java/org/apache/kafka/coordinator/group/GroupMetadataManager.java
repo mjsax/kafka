@@ -164,7 +164,6 @@ import org.apache.kafka.coordinator.group.streams.TasksTupleWithEpochs;
 import org.apache.kafka.coordinator.group.streams.assignor.StickyTaskAssignor;
 import org.apache.kafka.coordinator.group.streams.assignor.TaskAssignor;
 import org.apache.kafka.coordinator.group.streams.assignor.TaskAssignorException;
-import org.apache.kafka.coordinator.group.streams.assignor.TaskId;
 import org.apache.kafka.coordinator.group.streams.topics.ConfiguredSubtopology;
 import org.apache.kafka.coordinator.group.streams.topics.ConfiguredTopology;
 import org.apache.kafka.coordinator.group.streams.topics.InternalTopicManager;
@@ -2218,12 +2217,26 @@ public class GroupMetadataManager {
             assignmentUpdate = AssignmentUpdate.RECOMPUTE;
         }
 
-        // Maybe check if warmup task are hot, and the assignment can be refined furtther
+        // Maybe advance the assignment epoch to let the group reconcile toward the next intermediate (warm-up)
+        // assignment. We use refine() itself as the predicate -- rather than a separate "a warm-up is caught up"
+        // heuristic -- so that refine() is the single source of truth: a refinement step is warranted only when
+        // running the refiner would actually move this member's intermediate assignment away from what it is
+        // currently reconciled to. A no-op refine() therefore never bumps, so the decision to bump cannot drift
+        // from the assignment that is produced, and a refinement that changes nothing cannot livelock. Gated on
+        // STABLE (fully reconciled), so a step is never started on top of an in-progress reconciliation.
         if (assignmentUpdate == AssignmentUpdate.NONE
             && group.state() == StreamsGroup.StreamsGroupState.STABLE
-            && hasHotWarmupTask(group, streamsGroupAcceptableRecoveryLag(groupId))
         ) {
-            assignmentUpdate = AssignmentUpdate.REFINE;
+            TasksTuple refined = refine(
+                updatedMember,
+                group.targetAssignment(),
+                group.taskOffsets(),
+                streamsGroupNumWarmupReplicas(groupId),
+                streamsGroupAcceptableRecoveryLag(groupId)
+            );
+            if (!refined.sameTasks(updatedMember.assignedTasks())) {
+                assignmentUpdate = AssignmentUpdate.REFINE;
+            }
         }
 
         // Actually bump the group epoch
@@ -4343,36 +4356,6 @@ public class GroupMetadataManager {
     }
 
     /**
-     * Returns whether at least one currently-assigned warm-up task has caught up, i.e. its lag (reported end-offset minus reported
-     * offset) is within the acceptable recovery lag and it is therefore ready to be promoted to active.
-     *
-     * @param group                 The streams group.
-     * @param acceptableRecoveryLag The lag threshold below which a warm-up is considered caught up.
-     * @return true if at least one assigned warm-up task is caught up.
-     */
-    private boolean hasHotWarmupTask(StreamsGroup group, long acceptableRecoveryLag) {
-        for (StreamsGroupMember member : group.members().values()) {
-            Map<String, Set<Integer>> warmupTasks = member.assignedTasks().warmupTasks();
-            if (warmupTasks.isEmpty()) {
-                continue;
-            }
-            MemberTaskOffsets memberOffsets = group.taskOffsets(member.memberId());
-            for (Map.Entry<String, Set<Integer>> entry : warmupTasks.entrySet()) {
-                String subtopologyId = entry.getKey();
-                for (int partition : entry.getValue()) {
-                    TaskId taskId = new TaskId(subtopologyId, partition);
-                    Long offset = memberOffsets.taskOffsets().get(taskId);
-                    Long endOffset = memberOffsets.taskEndOffsets().get(taskId);
-                    if (offset != null && endOffset != null && endOffset - offset <= acceptableRecoveryLag) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
      * Updates the target assignment according to the updated member and metadata image.
      *
      * @param group                The StreamsGroup.
@@ -4430,7 +4413,8 @@ public class GroupMetadataManager {
             // A refinement step (warm-up promotion) only advances the assignment epoch of the unchanged final target so that members
             // re-reconcile toward the next in-memory intermediate assignment. The assignor is not run and the per-member target
             // assignment records are left untouched; only the (small) target-assignment metadata record carrying the epoch is written.
-            records.add(newStreamsGroupTargetAssignmentMetadataRecord(group.groupId(), groupEpoch, time.milliseconds()));
+            // The assignor did not run, so the existing assignment timestamp is preserved (the assignment interval must not restart).
+            records.add(newStreamsGroupTargetAssignmentMetadataRecord(group.groupId(), groupEpoch, group.assignmentTimestamp()));
             return new UpdateTargetAssignmentResult<>(groupEpoch, updatedMembersAndTargetAssignment.targetAssignment());
         }
 
