@@ -667,6 +667,14 @@ public class StreamsMembershipManager implements RequestManager {
      * @return True if the member should not send heartbeats, which is the case when it is in a
      * state where it is not an active member of the group.
      */
+    // [KAFKA-20860] (5) WHY THE MEMBER STAYS ALIVE, AND HOW TO STOP IT. isNotInGroup() is true only for UNSUBSCRIBED,
+    // FENCED, FATAL and STALE. After the failed reconciliation the state is still RECONCILING, so heartbeats keep
+    // flowing: no session timeout fires, the broker keeps the member and keeps its tasks assigned to it, and because
+    // an assignment that only adds tasks needs no acknowledgement, the group even reaches STABLE.
+    //
+    // This is the lever the fix needs. transitionToFatal() puts the member in FATAL, which makes this return true and
+    // stops the heartbeat, which is what lets the coordinator fence the member and hand its tasks to somebody else.
+    // Raising an ErrorEvent alone would tell the application but leave the group believing the member is healthy.
     public boolean shouldSkipHeartbeat() {
         return isNotInGroup();
     }
@@ -969,6 +977,16 @@ public class StreamsMembershipManager implements RequestManager {
         return unknownSubtopologies;
     }
 
+    // [KAFKA-20860] (6) WHAT SHOULD HAPPEN -- this method is the working template, and the only reason the wedge is
+    // reachable at all is that its call site (see onHeartbeatSuccess) is disabled on this branch. It does the three
+    // things the generic path does not: log with enough context to diagnose, hand the error to the application via
+    // backgroundEventHandler (the app thread rethrows it, so Streams sees it and its uncaught-exception handler runs),
+    // and transitionToFatal() so the heartbeat stops and the group can move the member's tasks elsewhere.
+    //
+    // It also shows the shape a general fix would take: the guard only covers a defect somebody anticipated, whereas
+    // any other synchronous throw inside maybeReconcile() still ends up at (4). Catching around the synchronous window
+    // and routing to the same three steps would close the class of failures rather than this one instance -- noting
+    // that a repeating deterministic cause then becomes a loud retry loop, which is the intended trade.
     private void failOnUnknownSubtopologies(final Set<String> unknownSubtopologies) {
         final String errorMessage = String.format(
             "Member %s of Streams group %s was assigned tasks of subtopologies %s, which are not part of the topology "
@@ -1126,6 +1144,11 @@ public class StreamsMembershipManager implements RequestManager {
      * Called by the network thread to reconcile the current and target assignment.
      */
     @Override
+    // [KAFKA-20860] (2) PROPAGATION. Reconciliation runs here, on the network thread's request-manager loop -- not in
+    // the heartbeat response callback. onHeartbeatSuccess() only stores the target assignment and flips the state to
+    // RECONCILING, so the bad assignment is accepted quietly and only blows up on a later poll(). That matters for
+    // where the failure surfaces: it is NOT swallowed by the discarded whenComplete stage in NetworkClientDelegate,
+    // it propagates out of runOnce() into the catch-all in ConsumerNetworkThread.run().
     public NetworkClientDelegate.PollResult poll(long currentTimeMs) {
         if (state == MemberState.RECONCILING) {
             maybeReconcile();
@@ -1147,12 +1170,21 @@ public class StreamsMembershipManager implements RequestManager {
                 "current assignment.");
             return;
         }
+        // [KAFKA-20860] (2b) WHERE THE WEDGE BECOMES PERMANENT. After the throw below has left the latch set, every
+        // later attempt returns here -- the log message promises a "next reconciliation loop" that can never come.
+        // This is also why the failure is a one-off rather than a hot loop, and therefore why nothing keeps drawing
+        // attention to it. Note transitionToJoining() does not clear the latch either (it only records
+        // rejoinedWhileReconciliationInProgress, consumed on the async path that by definition never runs), so even
+        // being fenced and rejoining does not reset this member.
         if (reconciliationInProgress) {
             log.trace("Ignoring reconciliation attempt. Another reconciliation is already in progress. Assignment {}" +
                 " will be handled in the next reconciliation loop.", targetAssignment);
             return;
         }
 
+        // [KAFKA-20860] (2a) The latch is set here and is only cleared by markReconciliationCompleted(), which is
+        // reached exclusively from the whenComplete stages further down. A synchronous throw before those stages exist
+        // therefore strands it set forever.
         markReconciliationInProgress();
 
         SortedSet<StreamsRebalanceData.TaskId> assignedActiveTasks = toTaskIdSet(targetAssignment.activeTasks);
@@ -1196,6 +1228,10 @@ public class StreamsMembershipManager implements RequestManager {
                 "Owned partitions from subscription state: " + ownedTopicPartitionsFromSubscriptionState + ", " +
                 "Owned partitions from assigned active tasks: " + ownedTopicPartitionsFromAssignedTasks);
         }
+        // [KAFKA-20860] (1a) This is the call that actually throws. The line above resolves the tasks this member
+        // already owns, which are by definition known; this one resolves the target assignment, which is where an
+        // unknown subtopology arrives. Everything from markReconciliationInProgress() down to the first future below
+        // is synchronous, so a throw anywhere in this window leaves the latch set with no completion stage to clear it.
         SortedSet<TopicPartition> assignedTopicPartitions = topicPartitionsForActiveTasks(targetAssignment.activeTasks);
         SortedSet<TopicPartition> partitionsToRevoke = new TreeSet<>(ownedTopicPartitionsFromSubscriptionState);
         partitionsToRevoke.removeAll(assignedTopicPartitions);
@@ -1324,6 +1360,9 @@ public class StreamsMembershipManager implements RequestManager {
         return assignedPartitionsNotPreviouslyOwned;
     }
 
+    // [KAFKA-20860] (1) ORIGIN. subtopologies() is this client's own topology, so get() returns null for any
+    // subtopology id the assignment names but the topology does not have, and sourceTopics() then throws NPE. The
+    // assignment is not validated anywhere before this point, so an id the broker made up reaches a raw map lookup.
     private SortedSet<TopicPartition> topicPartitionsForActiveTasks(final Map<String, SortedSet<Integer>> activeTasks) {
         final SortedSet<TopicPartition> topicPartitions = new TreeSet<>(TOPIC_PARTITION_COMPARATOR);
         activeTasks.forEach((subtopologyId, partitionIds) ->

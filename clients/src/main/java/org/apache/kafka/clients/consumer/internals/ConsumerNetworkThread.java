@@ -162,6 +162,12 @@ public class ConsumerNetworkThread extends KafkaThread implements Closeable {
                     runOnce();
                 } catch (final Throwable e) {
                     // Swallow the exception and continue
+                    // [KAFKA-20860] (4) END OF THE LINE. This is the only place the failure is ever observed: it is
+                    // logged here and dropped. Nothing routes it to backgroundEventHandler, so the application never
+                    // learns that its consumer stopped reconciling; and because the reconciliation latch (2) is still
+                    // set, the next iteration returns at the gate instead of throwing again -- one log line, then
+                    // silence. What should happen instead is what failOnUnknownSubtopologies() in
+                    // StreamsMembershipManager does for the case it recognises: raise an ErrorEvent AND go FATAL.
                     log.error("Unexpected error caught in consumer network thread", e);
                 }
             }
@@ -219,6 +225,11 @@ public class ConsumerNetworkThread extends KafkaThread implements Closeable {
 
         long pollWaitTimeMs = MAX_POLL_TIMEOUT_MS;
 
+        // [KAFKA-20860] (3) The throw from StreamsMembershipManager.poll() escapes here and abandons the rest of this
+        // iteration, including the network pump below -- so this one iteration sends and receives nothing. That is by
+        // design (a manager must not throw; errors belong on backgroundEventHandler), and it is also self-limiting
+        // here: the latch makes the throw a one-off, so heartbeating resumes on the very next iteration and the broker
+        // never notices anything was wrong.
         for (RequestManager rm : requestManagers.entries()) {
             NetworkClientDelegate.PollResult pollResult = rm.poll(currentTimeMs);
             long timeoutMs = networkClientDelegate.addAll(pollResult);
