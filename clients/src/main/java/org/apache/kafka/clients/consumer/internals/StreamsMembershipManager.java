@@ -456,6 +456,16 @@ public class StreamsMembershipManager implements RequestManager {
      * the user calls the subscribe API, or when the member wants to rejoin after getting fenced.
      * Visible for testing.
      */
+    // [KAFKA-20860] (C2) A REJOIN IS NOT A RESET, which is what turns a single transient failure into permanent
+    // damage. Being fenced and rejoining is the group's own repair mechanism, and it is the one thing that ought to
+    // put a member back on a clean footing; instead the member comes back with reconciliationInProgress still set and
+    // cannot reconcile whatever it is assigned next. Measured in ReconciliationFailureDuringRevocationIntegrationTest:
+    // one failure, and the member never runs a task again while the coordinator keeps assigning it work.
+    //
+    // The branch below looks like it handles this, but it only records that a rejoin happened. That flag is consumed
+    // exclusively by maybeAbortReconciliation() (C3), which runs on the asynchronous completion path -- the path that,
+    // by the premise of this bug, never runs. Clearing the latch here would make a rejoin the genuine reset it is
+    // supposed to be: a new membership has nothing left in flight from the old one.
     private void transitionToJoining() {
         if (state == MemberState.FATAL) {
             log.warn("No action taken to join the group with the updated subscription because " +
@@ -1453,6 +1463,11 @@ public class StreamsMembershipManager implements RequestManager {
         rejoinedWhileReconciliationInProgress = false;
     }
 
+    // [KAFKA-20860] (C3) THE RECOVERY THAT NEVER RUNS. This is exactly the mechanism the design provides for "the
+    // member rejoined while a reconciliation was in flight" -- it notices, logs, and calls markReconciliationCompleted()
+    // to clear the latch. It is unreachable in the one case that needs it: both of its call sites sit inside the
+    // whenComplete chain built after the synchronous window, so a throw in that window skips them, and every other
+    // route to markReconciliationCompleted() is in that same chain. The reset exists; nothing can reach it.
     private boolean maybeAbortReconciliation() {
         boolean shouldAbort = state != MemberState.RECONCILING || rejoinedWhileReconciliationInProgress;
         if (shouldAbort) {

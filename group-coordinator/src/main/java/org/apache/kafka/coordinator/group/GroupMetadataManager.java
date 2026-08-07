@@ -4088,6 +4088,14 @@ public class GroupMetadataManager {
                 updatedMember.tasksPendingRevocation().toString());
 
             // Schedule/cancel the rebalance timeout.
+            // [KAFKA-20860] (C4) This is the whole difference between the two shapes of the same client bug. A member
+            // that owes a revocation is UNREVOKED_TASKS, so the timeout below is armed against it and the member
+            // waiting for that task is blocked until it expires; a member whose assignment only adds tasks needs no
+            // acknowledgement, so nothing is armed and a broken member is never noticed at all.
+            //
+            // Fencing here looks like the group repairing itself, and it does free the tasks -- but it is not a repair
+            // of the member: it rejoins with its reconciliation latch still set (see (C2)), so it cannot run whatever
+            // it is assigned next either. The coordinator has no way to tell that apart from a healthy member.
             if (updatedMember.state() == org.apache.kafka.coordinator.group.streams.MemberState.UNREVOKED_TASKS) {
                 scheduleStreamsGroupRebalanceTimeout(
                     groupId,
