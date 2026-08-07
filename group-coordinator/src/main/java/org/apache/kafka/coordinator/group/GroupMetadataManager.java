@@ -2351,6 +2351,12 @@ public class GroupMetadataManager {
         boolean endpointChanged = hasUserEndpointChanged(member, updatedMember);
 
         // Echo the assignment back when joining or the assignment changed.
+        // [KAFKA-20860] (B6) Both conditions compare the coordinator's own before/after view of the member; neither
+        // asks whether the client actually applied anything. So the assignment goes out exactly once, and a client
+        // that loses that one delivery -- see StreamsMembershipManager.onHeartbeatSuccess (B5) -- is never told again:
+        // later heartbeats omit the task fields entirely and the client takes the "unchanged" branch. That is why a
+        // client-side fix cannot be "log it and retry later": there is nothing to retry against. It has to fail the
+        // member so the coordinator can fence it and reassign its tasks.
         if (isJoining || assignedTaskChanged) {
             response.setActiveTasks(createStreamsGroupHeartbeatResponseTaskIdsFromEpochs(updatedMember.assignedTasks().activeTasksWithEpochs()));
             response.setStandbyTasks(createStreamsGroupHeartbeatResponseTaskIds(updatedMember.assignedTasks().standbyTasks()));

@@ -784,6 +784,42 @@ public class StreamsMembershipManager implements RequestManager {
                 return;
             }
 
+            // ENABLE ME THE CODE BELOW, TO INJECT A DIFFERENT ERROR PATH INSIDE THE CONSUMER WHICH IS NOT HANDLED PROPERLY
+            //
+            // [KAFKA-20860] (B5) THROW SITE -- and a throw here is a no-op. This code runs inside the heartbeat
+            // response callback, so the exception is captured by the discarded dependent stage (B2) and produces no
+            // log, no event and no state change. Two things have already happened and are not undone: the heartbeat
+            // was booked as successful (B4), and updateMemberEpoch() above advanced this member's epoch, so the next
+            // heartbeat acknowledges an assignment that was never applied. processAssignmentReceived() below is never
+            // reached, so the state never becomes RECONCILING -- the client simply stays where it was, heartbeating.
+            //
+            // The bare `throw new IllegalStateException("Invalid response data, ...")` further down in this method is
+            // dead in exactly this way: if it ever fires, it silently does nothing.
+            //
+            // What makes this unrecoverable rather than merely invisible is on the broker: GroupMetadataManager only
+            // fills in the task fields `if (isJoining || assignedTaskChanged)`, so the assignment is echoed ONCE.
+            // Discarding that one delivery means it is gone -- the coordinator will never resend it, because from its
+            // side nothing changed. There is no retry that could help, because the client can never again be told
+            // what it was assigned.
+            //
+            // Proper behaviour therefore cannot be "report it and carry on"; it has to give the tasks up. That is what
+            // failOnUnknownSubtopologies() (annotated (6)) does, and each of its three steps earns its place:
+            //   - log with the ids involved, so the cause is diagnosable at all;
+            //   - backgroundEventHandler.add(new ErrorEvent(...)), so the application learns of it -- the app thread
+            //     rethrows it and the Streams uncaught-exception handler runs;
+            //   - transitionToFatal(), so shouldSkipHeartbeat() (annotated (5)) turns true and THE HEARTBEAT STOPS.
+            // The last one is what actually repairs the group: it lets the coordinator fence the member and hand its
+            // tasks to somebody else. Raising the error without it leaves a member the broker still believes is
+            // healthy, holding an input partition nobody consumes -- which is what the integration test's
+            // shouldRunEveryAssignedTask condition detects.
+//            for (final StreamsGroupHeartbeatResponseData.TaskIds activeTask : activeTasks) {
+//                if (activeTask.subtopologyId().equals("doesNotExist")) {
+//                    throw new IllegalArgumentException("KABOOM");
+//                }
+//            }
+
+
+            // DISABLING THIS CODE REMOVES THE KS FIX, TRIGGERING THE BROKEN ERROR HANDLING INSIDE THE CONSUMER/NETWORK-CLIENT
 //            final Set<String> unknownSubtopologies = unknownSubtopologies(activeTasks, standbyTasks, warmupTasks);
 //            if (!unknownSubtopologies.isEmpty()) {
 //                failOnUnknownSubtopologies(unknownSubtopologies);

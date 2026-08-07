@@ -395,6 +395,18 @@ public class NetworkClientDelegate implements AutoCloseable {
             return handler;
         }
 
+        // [KAFKA-20860] (B2) THE SEAM -- this is where the error is lost, for every request manager in the client.
+        // whenComplete() returns a new stage that holds any exception thrown by the callback; that stage is discarded
+        // here and nothing anywhere calls isCompletedExceptionally() on it. A callback failure therefore produces no
+        // exception, no log line, no metric and no event: it stops existing. Eleven managers register handlers through
+        // this one method, so this is a client-wide blind spot, not a Streams one.
+        //
+        // Proper behaviour would be to keep the dependent stage and observe it, e.g.
+        //     handler.future().whenComplete(callback).exceptionally(error -> { log.error(
+        //         "Failed to handle response for {}", requestBuilder.apiKey(), error); return null; });
+        // which costs one line and makes every one of those managers fail loudly instead of silently. That alone does
+        // not fix Streams -- see (B5) for why the member must also be brought down -- but without it no fix is even
+        // diagnosable, and defensive checks written as `throw` in any response handler are dead code today.
         UnsentRequest whenComplete(BiConsumer<ClientResponse, Throwable> callback) {
             handler.future().whenComplete(callback);
             return this;
@@ -461,6 +473,13 @@ public class NetworkClientDelegate implements AutoCloseable {
                 onFailure(completionTimeMs, response.versionMismatch());
             } else {
                 responseCompletionTimeMs = completionTimeMs;
+                // [KAFKA-20860] (B1) All response handling runs from inside this complete() call, synchronously, on
+                // the network thread. Per the CompletableFuture contract a whenComplete action that throws does NOT
+                // fail the source future and does NOT propagate to whoever called complete(): the failure is recorded
+                // on the DEPENDENT stage returned by whenComplete(). So complete() returns normally here no matter how
+                // badly the handlers below failed, the network thread carries on, and the next heartbeat is sent on
+                // schedule. This is the difference from the reconciliation path (1)-(6): that one at least reaches the
+                // catch-all in ConsumerNetworkThread.run(); nothing thrown from here ever gets that far.
                 this.future.complete(response);
             }
         }

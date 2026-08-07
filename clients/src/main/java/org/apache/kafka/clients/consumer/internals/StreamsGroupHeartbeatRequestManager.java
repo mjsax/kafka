@@ -616,6 +616,10 @@ public class StreamsGroupHeartbeatRequestManager implements RequestManager {
 
     private NetworkClientDelegate.UnsentRequest makeHeartbeatRequestAndHandleResponse(final long currentTimeMs) {
         NetworkClientDelegate.UnsentRequest request = makeHeartbeatRequest(currentTimeMs);
+        // [KAFKA-20860] (B3) Everything the client does with a heartbeat response happens inside this lambda, which
+        // rides the discarded stage described in NetworkClientDelegate.whenComplete (B2). There is no try/catch on the
+        // way down to StreamsMembershipManager.onHeartbeatSuccess, and no caller of this method looks at the future
+        // afterwards, so this lambda is the outermost frame that could still contain a failure -- and it does not.
         return request.whenComplete((response, exception) -> {
             long completionTimeMs = request.handler().completionTimeMs();
             if (response != null) {
@@ -647,6 +651,11 @@ public class StreamsGroupHeartbeatRequestManager implements RequestManager {
         }
     }
 
+    // [KAFKA-20860] (B4) Note the ordering: the heartbeat is booked as a success and its timer reset HERE, several
+    // statements before membershipManager.onHeartbeatSuccess() at the end of this method is even called. So by the
+    // time the assignment is looked at, the client has already committed to carrying on as if all was well -- if
+    // handling the assignment then fails, nothing walks that back. The member keeps heartbeating on schedule, the
+    // coordinator sees a healthy member, and its tasks stay assigned to a client that will never run them.
     private void onSuccessResponse(final StreamsGroupHeartbeatResponse response, final long currentTimeMs) {
         final StreamsGroupHeartbeatResponseData data = response.data();
         heartbeatRequestState.updateHeartbeatIntervalMs(data.heartbeatIntervalMs());
