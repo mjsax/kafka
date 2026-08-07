@@ -234,6 +234,13 @@ public class StreamsMembershipManager implements RequestManager {
     private CompletableFuture<Void> staleMemberAssignmentRelease;
 
     /**
+     * [KAFKA-20860] Static, so that the probe in {@link #maybeReconcile()} fires once for the whole JVM no matter how
+     * many clients are running, and only when {@code kafka20860.failOnceWhileRevoking} is set so that other tests
+     * cannot consume it.
+     */
+    private static final AtomicBoolean FAILED_ONCE_WHILE_REVOKING = new AtomicBoolean(false);
+
+    /**
      * If there is a reconciliation running (callbacks).
      * This will be true if {@link #maybeReconcile()} has been triggered
      * after receiving a heartbeat response, or a metadata update.
@@ -1227,6 +1234,20 @@ public class StreamsMembershipManager implements RequestManager {
         SortedSet<StreamsRebalanceData.TaskId> ownedActiveTasks = toTaskIdSet(currentAssignment.activeTasks);
         SortedSet<StreamsRebalanceData.TaskId> activeTasksToRevoke = new TreeSet<>(ownedActiveTasks);
         activeTasksToRevoke.removeAll(assignedActiveTasks);
+        // [KAFKA-20860] (C1) PROBE -- stands in for any defect in the synchronous part of a reconciliation that has to
+        // revoke something. Unlike the unknown-subtopology case, this state cannot be produced from an assignor:
+        // CurrentAssignmentBuilder withholds additions while a revocation is pending, so a member is only ever asked
+        // to revoke on its own. The point of throwing here rather than on the addition path is that the member is in
+        // UNREVOKED_TASKS on the coordinator, which arms the rebalance timeout against it and blocks the member
+        // waiting for the task -- and, once that timeout fences it, the rejoin does not clear the reconciliation latch
+        // (see (2b)), so the member cannot reconcile its next assignment either.
+        // It fires only ONCE for the whole JVM, which is the whole point: if the failure kept recurring, a group that
+        // never settles would prove nothing. One defect, one time, and the group still has to recover on its own.
+        if (!activeTasksToRevoke.isEmpty()
+                && Boolean.getBoolean("kafka20860.failOnceWhileRevoking")
+                && FAILED_ONCE_WHILE_REVOKING.compareAndSet(false, true)) {
+            throw new IllegalStateException("KABOOM while revoking " + activeTasksToRevoke);
+        }
         SortedSet<StreamsRebalanceData.TaskId> assignedStandbyTasks = toTaskIdSet(targetAssignment.standbyTasks);
         SortedSet<StreamsRebalanceData.TaskId> ownedStandbyTasks = toTaskIdSet(currentAssignment.standbyTasks);
         SortedSet<StreamsRebalanceData.TaskId> assignedWarmupTasks = toTaskIdSet(targetAssignment.warmupTasks);

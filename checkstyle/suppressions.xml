@@ -73,9 +73,9 @@
     <suppress checks="CyclomaticComplexity"
               files="(AbstractFetch|BufferPool|ClientTelemetryReporter|ConsumerCoordinator|CommitRequestManager|FetchCollector|OffsetFetcherUtils|KafkaProducer|Sender|ConfigDef|KerberosLogin|AbstractRequest|AbstractResponse|Selector|SslFactory|SslTransportLayer|SaslClientAuthenticator|SaslClientCallbackHandler|SaslServerAuthenticator|AbstractCoordinator|TransactionManager|AbstractStickyAssignor|DefaultSslEngineFactory|Authorizer|RecordAccumulator|MemoryRecords|FetchSessionHandler|MockAdminClient).java"/>
 
-    <!-- KAFKA-20860 demo branch only: the injected probe in onHeartbeatSuccess that triggers the swallowed-response
-         scenario adds two decision points. Not for trunk; this branch is not meant to be merged. -->
-    <suppress checks="CyclomaticComplexity"
+    <!-- KAFKA-20860 demo branch only: the injected probes in onHeartbeatSuccess and maybeReconcile that trigger the
+         two failure scenarios add decision points. Not for trunk; this branch is not meant to be merged. -->
+    <suppress checks="CyclomaticComplexity|NPathComplexity"
               files="StreamsMembershipManager.java"/>
 
     <suppress checks="JavaNCSS"
