@@ -776,11 +776,11 @@ public class StreamsMembershipManager implements RequestManager {
                 return;
             }
 
-            final Set<String> unknownSubtopologies = unknownSubtopologies(activeTasks, standbyTasks, warmupTasks);
-            if (!unknownSubtopologies.isEmpty()) {
-                failOnUnknownSubtopologies(unknownSubtopologies);
-                return;
-            }
+//            final Set<String> unknownSubtopologies = unknownSubtopologies(activeTasks, standbyTasks, warmupTasks);
+//            if (!unknownSubtopologies.isEmpty()) {
+//                failOnUnknownSubtopologies(unknownSubtopologies);
+//                return;
+//            }
 
             processAssignmentReceived(
                 toTasksAssignment(activeTasks),
