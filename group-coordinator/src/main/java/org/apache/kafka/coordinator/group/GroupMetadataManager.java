@@ -2426,6 +2426,21 @@ public class GroupMetadataManager {
             }
         }
 
+        // [KAFKA-20860 / KAFKA-20981] Test probe: stand in for a broker that returns a status code an older client does
+        // not know (a violated version contract). Gated on a system property so it only fires in the test that arms it,
+        // and further restricted so it is withheld while the member is (re-)joining (memberEpoch == 0) and fires only on
+        // a heartbeat that actually delivers a changed assignment.
+        //
+        // The join is skipped because a joining member attaches its topology to the heartbeat; if the swallowed decode
+        // strands it in JOINING at an already-advanced epoch, its next heartbeat re-sends that topology and the broker
+        // rejects it as "topology at a non-zero epoch" -- a secondary error that would mask the swallow. Firing only on
+        // an assignment-carrying heartbeat puts the unknown status on the same response as real reconciliation work, so
+        // a swallow drops that assignment (and the fix must reject the whole response without first applying it).
+        if (Boolean.getBoolean("kafka20860.injectUnknownStatus") && !isJoining && assignedTaskChanged) {
+            returnedStatus.add(new Status()
+                .setStatusCode((byte) 99)
+                .setStatusDetail("a condition this client has never heard of"));
+        }
         response.setStatus(returnedStatus);
 
         return new CoordinatorResult<>(records, new StreamsGroupHeartbeatResult(
